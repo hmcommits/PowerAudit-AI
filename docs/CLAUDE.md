@@ -212,6 +212,45 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 
 ## Backlog / known limitations (found during build, not yet actioned)
 
+> ⚠️ **STANDING RISK — read before touching any MD/PF formula or constant.**
+> The deterministic recalculation math exists in **two places** that must
+> be kept manually in sync, with no shared source and no automated check
+> that they agree:
+> - Python: `calculators/bill_line_parser.py`, `tariff_penalty_calculator.py`,
+>   `variance_detector.py`, `dollar_impact_scorer.py`
+> - TypeScript: `apps/poweraudit-ai-ui/src/lib/calculators.ts`,
+>   `stubTariff.ts`
+>
+> This split exists because no RocketRide pipeline node runs arbitrary
+> deterministic Python on demand (`tool_python`'s direct-invoke path
+> doesn't work - see below) and the browser can't execute the Python
+> scripts directly, so Feature 5's interactive upload needed its own
+> client-side port. **This is not a one-time note - it is a standing
+> maintenance obligation.** Any future change to a formula, a threshold, a
+> rounding rule, or `STUB_TARIFF_PARAMS`/`STUB_CITATION` MUST be applied to
+> **both** implementations and then re-verified identical (see
+> `apps/poweraudit-ai-ui/scripts/test-calculator-parity.mts`, which diffs
+> every Finding the TypeScript calculators would produce against the
+> Python-computed Finding already in RocketRide SQL, for every real bill on
+> file) before being considered done. A change applied to only one side
+> will silently diverge - there is no compiler, linter, or test that
+> catches this on its own; running the parity script is the check.
+
+- **SDK's `onTrace` redacts credential-shaped fields structurally, not by
+  value.** While verifying the Gemini key never leaves the client resolved
+  (see Feature 5's `test-upload-integration.mts`-style security check),
+  capturing the raw `client.use()` wire message via the `onTrace` hook
+  showed `"apikey": "<redacted>"` in place of `bill-ingestion.pipe`'s
+  `"apikey": "${ROCKETRIDE_GEMINI_KEY}"` config field — the SDK blanks any
+  field it recognizes as credential-shaped before `onTrace` ever sees it,
+  regardless of whether the value is a real secret or an unresolved
+  `${...}` placeholder. Useful defense in depth, but it means `onTrace`
+  **cannot** be used to confirm what a pipeline config field actually
+  contains — that has to be checked at the source (the `.pipe` file and the
+  app's TypeScript source, both grepped clean of the literal key) and via
+  `getTaskPipeline()`, which does return the field's real content
+  (confirmed: placeholder intact, literal key absent) since it isn't routed
+  through trace redaction.
 - **Feature 5: meter-mismatch review queue.** OCR misreads on meter numbers
   (e.g. `M009` read as `MOO9`, `M010` read as `M01o`) currently make
   `bill-ingestion.pipe` REJECT the bill outright — no `Bill` row is written,
