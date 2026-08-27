@@ -124,43 +124,53 @@ export const DrilldownView: React.FC = () => {
 
 	const billColumns: GridColumnDefinition[] = useMemo(
 		() => [
-			{ title: 'Bill', field: 'bill_id', rrType: 'string', rrDefault: true, rrDescription: 'Bill record id - the source lineage for any Finding on this row.' },
+			{ title: 'Bill', field: 'bill_id', rrType: 'string', rrDefault: true, rrDescription: 'Bill record id - the source lineage for any Finding on this row.', tooltip: true, minWidth: 150 },
 			{ title: 'Period', field: 'period_start', rrType: 'date', rrDefault: true, rrDescription: 'Billing period start date.' },
-			{ title: 'Recorded MD (kVA)', field: 'recorded_md', rrType: 'number', rrDefault: true, rrDescription: 'Maximum Demand as printed on the bill.' },
-			{ title: 'Recorded PF', field: 'recorded_pf', rrType: 'number', rrDefault: true, rrDescription: 'Power Factor as printed on the bill.' },
+			{ title: 'MD (kVA)', field: 'recorded_md', rrType: 'number', rrDefault: true, rrDescription: 'Maximum Demand as printed on the bill.', minWidth: 90 },
+			{ title: 'PF', field: 'recorded_pf', rrType: 'number', rrDefault: true, rrDescription: 'Power Factor as printed on the bill.', minWidth: 70 },
+			{ title: 'Total due', field: 'total_due', rrType: 'number', rrDefault: true, rrDescription: 'Total amount due as billed.', minWidth: 100 },
 			{
+				title: 'Review?',
+				field: 'needs_review',
+				rrType: 'boolean',
+				rrDefault: true,
+				rrDescription: "Feature 1's Schema Validate flag - true when extraction found something implausible or self-corrected a value.",
+				minWidth: 80,
+			},
+			{
+				// Hidden from the default view - this is a long concatenated
+				// "description: amount" string per bill and was crowding out
+				// every other column (Review?/MD/PF headers were rendering
+				// cut down to a single letter). Still available via the
+				// grid's column toggle for anyone who needs it, full text on
+				// hover once shown (rrDescription doubles as the toggle-list
+				// tooltip).
 				title: 'Line items',
 				field: 'line_items',
 				rrType: 'string',
-				rrDefault: true,
 				rrDescription: 'Billed line items as extracted (description: amount).',
+				tooltip: true,
 				formatter: (cell: any) =>
 					parseLineItems(cell.getValue())
 						.map((item) => `${item.description ?? '?'}: ${item.amount ?? '?'}`)
 						.join(', ') || '-',
 			},
-			{ title: 'Total due', field: 'total_due', rrType: 'number', rrDefault: true, rrDescription: 'Total amount due as billed.' },
-			{
-				title: 'Needs review',
-				field: 'needs_review',
-				rrType: 'boolean',
-				rrDefault: true,
-				rrDescription: "Feature 1's Schema Validate flag - true when extraction found something implausible or self-corrected a value.",
-			},
-			{ title: 'Source document', field: 'source_doc_ref', rrType: 'string', rrDescription: 'The ingested file this bill came from.' },
+			{ title: 'Source document', field: 'source_doc_ref', rrType: 'string', rrDescription: 'The ingested file this bill came from.', tooltip: true },
 		],
 		[],
 	);
 
 	const findingColumns: GridColumnDefinition[] = useMemo(
 		() => [
-			{ title: 'Finding', field: 'finding_id', rrType: 'string', rrDefault: true, rrDescription: 'Finding record id.' },
+			{ title: 'Finding', field: 'finding_id', rrType: 'string', rrDefault: true, rrDescription: 'Finding record id.', tooltip: true, minWidth: 150 },
 			{
-				title: 'From bill',
+				title: 'Bill',
 				field: 'bill_id',
 				rrType: 'string',
 				rrDefault: true,
 				rrDescription: 'Lineage: the exact Bill record this Finding was calculated from.',
+				tooltip: true,
+				minWidth: 130,
 			},
 			{ title: 'Type', field: 'type', rrType: 'enum', rrDefault: true, rrDescription: "Finding category (Section 3's enum)." },
 			{
@@ -168,10 +178,23 @@ export const DrilldownView: React.FC = () => {
 				field: 'rupee_impact',
 				rrType: 'number',
 				rrDefault: true,
-				rrDescription: 'Positive = consumer overcharged (dispute-worthy); negative = undercharged.',
+				rrDescription:
+					'Positive = consumer overcharged, a real actionable finding worth disputing. Negative = undercharged - not disputable, shown muted so it does not read as an action item.',
+				minWidth: 110,
+				// Muted/gray for a negative (undercharge, not disputable) impact;
+				// normal weight for a positive (real, dispute-worthy) one - so
+				// which findings are actually worth acting on is visible at a
+				// glance, not just from the sign of a number.
+				formatter: (cell: any) => {
+					const raw = cell.getValue();
+					const num = Number(raw);
+					if (!Number.isFinite(num)) return raw == null ? '-' : String(raw);
+					const text = `Rs. ${num.toLocaleString('en-IN')}`;
+					return num > 0 ? `<span style="font-weight:700;">${text}</span>` : `<span style="color:var(--rr-text-secondary, #888);">${text}</span>`;
+				},
 			},
 			{ title: 'Confidence', field: 'confidence', rrType: 'number', rrDefault: true, rrDescription: 'Extraction confidence backing this Finding, 0-1.' },
-			{ title: 'Tariff citation', field: 'tariff_citation', rrType: 'string', rrDescription: 'The tariff clause backing the recalculation (stub pending the Vector fix - see docs/CLAUDE.md Backlog).' },
+			{ title: 'Tariff citation', field: 'tariff_citation', rrType: 'string', rrDescription: 'The tariff clause backing the recalculation (stub pending the Vector fix - see docs/CLAUDE.md Backlog).', tooltip: true },
 		],
 		[],
 	);
@@ -240,7 +263,7 @@ export const DrilldownView: React.FC = () => {
 						</div>
 					</Card>
 
-					<div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, overflowY: 'auto' }}>
+					<div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
 						{activeMeter && (
 							<Banner variant="info">
 								{activeMeter.meter_id} — {activeMeter.discom}, {activeMeter.tariff_category}, Contract Demand {activeMeter.contract_demand_kva} kVA, site{' '}
@@ -393,6 +416,8 @@ function ClaimCard(props: { claim: ClaimRow; client: RocketRideClient | null; on
 					background: 'var(--rr-surface-secondary, rgba(128,128,128,0.08))',
 					borderRadius: 6,
 					padding: 10,
+					maxHeight: 220,
+					overflowY: 'auto',
 				}}
 			>
 				{claim.draft_packet || '(no packet text on this claim)'}
