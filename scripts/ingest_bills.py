@@ -1,7 +1,8 @@
-"""Feature 1: run every synthetic bill through bill-ingestion.pipe, validate
-the extracted fields (the "Schema Validate" step - plain Python, since no
-pipeline node does generic numeric plausibility checks; see project notes),
-and write Bill rows to RocketRide SQL via the foundation-sql pipeline.
+"""Feature 1: run every synthetic bill through bill-ingestion.pipe (extract_facts,
+not extract_data - see rr_common.build_bill_ingestion_pipeline's docstring),
+validate the extracted fields (the "Schema Validate" step - plain Python,
+since no pipeline node does generic numeric plausibility checks; see project
+notes), and write Bill rows to RocketRide SQL via the foundation-sql pipeline.
 
 Three outcomes per bill, printed in the summary:
   - OK            : all checks passed, written with needs_review = false
@@ -37,9 +38,22 @@ def to_number(value):
         return None
 
 
-def validate_bill(fields):
-    """Plain-Python "Schema Validate": returns (needs_review: bool, reasons: list[str])."""
+def validate_bill(fields, validation):
+    """Plain-Python "Schema Validate": returns (needs_review: bool, reasons: list[str]).
+
+    `validation` is extract_facts' own `_validation` block (changed/reason),
+    surfaced here rather than silently trusted - if the extractor needed to
+    reconcile a first-pass value against the source text at all, that's worth
+    a human glance regardless of which way it went.
+    """
     reasons = []
+
+    if validation.get("changed"):
+        reasons.append(f"extractor self-corrected a value on reconciliation: {validation.get('reason') or 'no reason given'}")
+
+    anomaly_text = str(fields.get("anomaly_flags") or "").strip()
+    if anomaly_text:
+        reasons.append(f"extractor-reported anomaly: {anomaly_text}")
 
     recorded_md = to_number(fields.get("recorded_md"))
     if recorded_md is None:
@@ -75,20 +89,29 @@ def validate_bill(fields):
 
 
 def extract_fields(send_result_entry):
-    """Pull the extract_data answer dict out of one send_files() result entry."""
+    """Pull the extract_facts answer dict out of one send_files() result entry.
+
+    Returns (fields, validation, error). `validation` is the popped
+    `_validation` block (changed/reason); `_provenance` is also popped from
+    fields (rich per-fact lineage - page/table/row/col/source_text/confidence
+    - not persisted by Feature 1, useful for Feature 5's lineage tracing).
+    """
     if send_result_entry.get("action") != "complete":
-        return None, send_result_entry.get("error")
+        return None, {}, send_result_entry.get("error")
     result = send_result_entry.get("result") or {}
     if "error" in result:
-        return None, result["error"]
+        return None, {}, result["error"]
     answers = result.get("answers")
     try:
-        fields = answers[0][0]
+        raw = answers[0][0]
     except (TypeError, IndexError, KeyError):
-        fields = None
-    if not fields:
-        return {}, None
-    return fields, None
+        raw = None
+    if not raw:
+        return {}, {}, None
+    fields = dict(raw)
+    validation = fields.pop("_validation", None) or {}
+    fields.pop("_provenance", None)
+    return fields, validation, None
 
 
 async def main():
@@ -112,13 +135,34 @@ async def main():
         print("bill-ingestion pipeline started:", bill_token)
 
         paths = sorted(glob.glob(os.path.join(BILLS_DIR, "*")))
-        print(f"Sending {len(paths)} bills (parallel batch, per Feature 6's batch requirement)...")
-        results = await client.send_files(paths, bill_token)
+        # NOTE: sent one-at-a-time with a delay, not as one parallel batch, to
+        # stay under the free-tier Gemini quota (15 req/min; extract_facts'
+        # validate=true pass roughly doubles LLM calls per document versus
+        # extract_data, so a full parallel send_files() of 18 bills hit
+        # 429 RESOURCE_EXHAUSTED on most of them). Feature 6's "drop a whole
+        # folder in, process in parallel" requirement still holds once on
+        # paid-tier quota / a self-hosted LLM - this throttle is a free-tier
+        # testing accommodation, not a pipeline design change.
+        print(f"Sending {len(paths)} bills one at a time (free-tier rate limit)...")
+        entries = []
+        for path in paths:
+            for attempt in range(4):
+                result = await client.send_files([path], bill_token)
+                entry = result[0]
+                err_msg = str((entry.get("result") or {}).get("error", ""))
+                if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+                    wait = 15 * (attempt + 1)
+                    print(f"  rate-limited on {os.path.basename(path)}, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+                break
+            entries.append(entry)
+            await asyncio.sleep(5)
 
         summary = []
-        for path, entry in zip(paths, results):
+        for path, entry in zip(paths, entries):
             name = os.path.basename(path)
-            fields, err = extract_fields(entry)
+            fields, validation, err = extract_fields(entry)
 
             if err is not None:
                 summary.append((name, "ERROR", [f"pipeline error: {err}"], None))
@@ -135,7 +179,7 @@ async def main():
                 if r["rows"]:
                     meter_row = r["rows"][0]["meter_id"]
 
-            needs_review, reasons = validate_bill(fields or {})
+            needs_review, reasons = validate_bill(fields or {}, validation)
 
             if not meter_number:
                 reasons = ["meter_number missing or unreadable"] + reasons

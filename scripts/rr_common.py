@@ -102,18 +102,33 @@ def build_foundation_sql_pipeline():
 
 BILL_EXTRACT_FIELDS = [
     {"column": "meter_number", "type": "text", "defval": ""},
-    {"column": "period_start", "type": "date", "defval": ""},
-    {"column": "period_end", "type": "date", "defval": ""},
+    {"column": "period_start", "type": "text", "defval": ""},
+    {"column": "period_end", "type": "text", "defval": ""},
     {"column": "tariff_category", "type": "text", "defval": ""},
     {"column": "contract_demand_kva", "type": "decimal", "defval": ""},
     {"column": "recorded_md", "type": "decimal", "defval": ""},
     {"column": "recorded_pf", "type": "decimal", "defval": ""},
     {"column": "total_due", "type": "decimal", "defval": ""},
     {"column": "line_items", "type": "json", "defval": ""},
+    {"column": "anomaly_flags", "type": "text", "defval": ""},
 ]
 
 
 def build_bill_ingestion_pipeline():
+    # Uses extract_facts, not extract_data: both nodes' underlying LLM prompt has
+    # a built-in tendency to "fix" internally-inconsistent values (verified by
+    # testing - neither renaming nor retyping the `fields` config changes this,
+    # since neither node exposes a real instructions/prompt field, only the
+    # typed `fields` list). extract_facts' validate=true reconciliation pass
+    # sometimes catches its own first-pass normalization and restores the
+    # as-printed value, recording why in `_validation` - this is NOT a
+    # guarantee (same field, same document, has been observed both caught and
+    # missed across runs - it's still an LLM, not deterministic), but it is a
+    # strict improvement over extract_data (which unconditionally normalized
+    # in every test) and it surfaces a `_validation.changed`/`reason` signal
+    # scripts/ingest_bills.py folds into needs_review. `period_start`/`_end`
+    # are typed "text" (not "date") since date-typing made no measurable
+    # difference and text avoids any implicit date-coercion in transport.
     dropper_1 = node(
         "dropper_1",
         "dropper",
@@ -146,26 +161,37 @@ def build_bill_ingestion_pipeline():
         input_=[{"lane": "image", "from": "image_cleanup_1"}],
         ui={"position": {"x": 680, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
     )
-    extract_data_1 = node(
-        "extract_data_1",
-        "extract_data",
+    preprocessor_langchain_1 = node(
+        "preprocessor_langchain_1",
+        "preprocessor_langchain",
+        {"parameters": {}},
+        input_=[
+            # Born-digital PDFs: parse extracts text directly, never producing
+            # an "image" lane, so the image_cleanup -> ocr chain never fires for them.
+            {"lane": "text", "from": "parse_1"},
+            # Scanned/photographed bills: parse extracts "image", which flows
+            # through cleanup + OCR to produce text instead.
+            {"lane": "text", "from": "ocr_1"},
+        ],
+        ui={"position": {"x": 900, "y": 140}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+    )
+    extract_facts_1 = node(
+        "extract_facts_1",
+        "extract_facts",
         {
             "profile": "default",
-            "default": {"fields": BILL_EXTRACT_FIELDS},
+            "default": {"fields": BILL_EXTRACT_FIELDS, "validate": True, "include_provenance": True},
             "parameters": {},
         },
         input_=[
-            # Born-digital PDFs: parse extracts text/table directly, never producing
-            # an "image" lane, so the image_cleanup -> ocr chain never fires for them.
-            {"lane": "text", "from": "parse_1"},
+            {"lane": "documents", "from": "preprocessor_langchain_1"},
+            # Real tabular line-item layouts (parse/ocr both recognize genuine
+            # tables) go straight into the table lane too.
             {"lane": "table", "from": "parse_1"},
-            # Scanned/photographed bills: parse extracts "image", which flows
-            # through cleanup + OCR to produce text/table instead.
-            {"lane": "text", "from": "ocr_1"},
             {"lane": "table", "from": "ocr_1"},
         ],
         control=None,
-        ui={"position": {"x": 900, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+        ui={"position": {"x": 1120, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
     )
     llm_gemini_1 = node(
         "llm_gemini_1",
@@ -175,18 +201,21 @@ def build_bill_ingestion_pipeline():
             "models-gemini-3-5-flash-lite": {"apikey": "${ROCKETRIDE_GEMINI_KEY}"},
             "parameters": {},
         },
-        control=[{"classType": "llm", "from": "extract_data_1"}],
-        ui={"position": {"x": 900, "y": 360}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+        control=[{"classType": "llm", "from": "extract_facts_1"}],
+        ui={"position": {"x": 1120, "y": 360}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
     )
     response_1 = node(
         "response_answers_1",
         "response_answers",
         {"laneName": "answers"},
-        input_=[{"lane": "answers", "from": "extract_data_1"}],
-        ui={"position": {"x": 1120, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+        input_=[{"lane": "answers", "from": "extract_facts_1"}],
+        ui={"position": {"x": 1340, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
     )
     return {
-        "components": [dropper_1, parse_1, image_cleanup_1, ocr_1, extract_data_1, llm_gemini_1, response_1],
+        "components": [
+            dropper_1, parse_1, image_cleanup_1, ocr_1,
+            preprocessor_langchain_1, extract_facts_1, llm_gemini_1, response_1,
+        ],
         "source": "dropper_1",
         "project_id": BILL_INGESTION_PROJECT_ID,
         "viewport": {"x": 0, "y": 0, "zoom": 1},

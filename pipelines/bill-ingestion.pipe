@@ -100,8 +100,37 @@
       }
     },
     {
-      "id": "extract_data_1",
-      "provider": "extract_data",
+      "id": "preprocessor_langchain_1",
+      "provider": "preprocessor_langchain",
+      "config": {
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parse_1"
+        },
+        {
+          "lane": "text",
+          "from": "ocr_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 140
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "extract_facts_1",
+      "provider": "extract_facts",
       "config": {
         "profile": "default",
         "default": {
@@ -113,12 +142,12 @@
             },
             {
               "column": "period_start",
-              "type": "date",
+              "type": "text",
               "defval": ""
             },
             {
               "column": "period_end",
-              "type": "date",
+              "type": "text",
               "defval": ""
             },
             {
@@ -150,23 +179,26 @@
               "column": "line_items",
               "type": "json",
               "defval": ""
+            },
+            {
+              "column": "anomaly_flags",
+              "type": "text",
+              "defval": ""
             }
-          ]
+          ],
+          "validate": true,
+          "include_provenance": true
         },
         "parameters": {}
       },
       "input": [
         {
-          "lane": "text",
-          "from": "parse_1"
+          "lane": "documents",
+          "from": "preprocessor_langchain_1"
         },
         {
           "lane": "table",
           "from": "parse_1"
-        },
-        {
-          "lane": "text",
-          "from": "ocr_1"
         },
         {
           "lane": "table",
@@ -175,7 +207,7 @@
       ],
       "ui": {
         "position": {
-          "x": 900,
+          "x": 1120,
           "y": 200
         },
         "measured": {
@@ -199,12 +231,12 @@
       "control": [
         {
           "classType": "llm",
-          "from": "extract_data_1"
+          "from": "extract_facts_1"
         }
       ],
       "ui": {
         "position": {
-          "x": 900,
+          "x": 1120,
           "y": 360
         },
         "measured": {
@@ -224,12 +256,12 @@
       "input": [
         {
           "lane": "answers",
-          "from": "extract_data_1"
+          "from": "extract_facts_1"
         }
       ],
       "ui": {
         "position": {
-          "x": 1120,
+          "x": 1340,
           "y": 200
         },
         "measured": {
