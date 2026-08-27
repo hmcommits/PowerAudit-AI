@@ -23,6 +23,16 @@ from calculators.dollar_impact_scorer import score_finding, score_findings
 from calculators.history_aggregator import build_history
 from calculators.trend_classifier import classify_cd_trend, classify_pf_trend
 from calculators.what_if import what_if_cd_change
+from calculators.contract_impact_classifier import classify_contract_impact
+from calculators.claim_workflow import (
+    is_material,
+    submit_for_approval,
+    approve_claim,
+    deny_claim,
+    file_claim,
+    mark_under_review,
+    mark_credited,
+)
 
 
 class TestParseAmount(unittest.TestCase):
@@ -386,6 +396,90 @@ class TestWhatIf(unittest.TestCase):
         history = build_history(_rows(md_series=[400, 420]))
         result = what_if_cd_change(history, current_cd=530, hypothetical_cd=560, tariff_params={"demand_charge_rate": 450, "penalty_multiplier": 1.75})
         self.assertEqual(result["status"], "insufficient_data")
+
+
+class TestContractImpactClassifier(unittest.TestCase):
+    def test_misclass_always_contract_impacting(self):
+        finding = {"type": "misclass"}
+        result = classify_contract_impact(finding, [finding])
+        self.assertTrue(result["contract_impacting"])
+
+    def test_single_md_penalty_not_contract_impacting(self):
+        finding = {"type": "md-penalty", "meter_id": "M999"}
+        result = classify_contract_impact(finding, [finding])
+        self.assertFalse(result["contract_impacting"])
+
+    def test_recurring_md_penalty_is_contract_impacting(self):
+        findings = [{"type": "md-penalty"}, {"type": "md-penalty"}]
+        result = classify_contract_impact(findings[0], findings)
+        self.assertTrue(result["contract_impacting"])
+        self.assertIn("2 md-penalty", result["reason"])
+
+    def test_pf_penalty_never_contract_impacting_even_if_repeated(self):
+        findings = [{"type": "pf-penalty"}, {"type": "pf-penalty"}, {"type": "pf-penalty"}]
+        result = classify_contract_impact(findings[0], findings)
+        self.assertFalse(result["contract_impacting"])
+
+    def test_math_error_not_contract_impacting(self):
+        finding = {"type": "math-error"}
+        result = classify_contract_impact(finding, [finding])
+        self.assertFalse(result["contract_impacting"])
+
+
+class TestClaimWorkflow(unittest.TestCase):
+    def test_is_material_requires_positive_overcharge_above_threshold(self):
+        self.assertTrue(is_material({"rupee_impact": 4125.0}))
+        self.assertFalse(is_material({"rupee_impact": 1500.0}))  # below threshold
+        self.assertFalse(is_material({"rupee_impact": -11812.5}))  # undercharge, not a refund case
+        self.assertFalse(is_material({"rupee_impact": None}))
+
+    def test_normal_lifecycle(self):
+        status = "draft"
+        status = submit_for_approval(status)
+        self.assertEqual(status, "pending_approval")
+        status = approve_claim(status, "Priya Sharma, Facilities Manager")
+        self.assertEqual(status, "approved_ready_to_file")
+        status = file_claim(status)
+        self.assertEqual(status, "filed")
+        status = mark_under_review(status)
+        self.assertEqual(status, "under_discom_review")
+        status = mark_credited(status, 4125.0)
+        self.assertEqual(status, "credited")
+
+    def test_denial_path(self):
+        status = submit_for_approval("draft")
+        status = deny_claim(status)
+        self.assertEqual(status, "denied")
+
+    def test_cannot_skip_straight_from_draft_to_approved(self):
+        with self.assertRaises(ValueError):
+            approve_claim("draft", "Priya Sharma")
+
+    def test_cannot_approve_without_a_named_approver_regardless_of_size(self):
+        # This is THE guarantee: no claim, however large, auto-approves.
+        status = submit_for_approval("draft")
+        with self.assertRaises(ValueError):
+            approve_claim(status, "")
+        with self.assertRaises(ValueError):
+            approve_claim(status, None)
+        with self.assertRaises(ValueError):
+            approve_claim(status, "   ")
+
+    def test_cannot_double_submit(self):
+        status = submit_for_approval("draft")
+        with self.assertRaises(ValueError):
+            submit_for_approval(status)
+
+    def test_cannot_file_before_approval(self):
+        with self.assertRaises(ValueError):
+            file_claim("pending_approval")
+
+    def test_cannot_credit_without_a_positive_amount(self):
+        status = "under_discom_review"
+        with self.assertRaises(ValueError):
+            mark_credited(status, 0)
+        with self.assertRaises(ValueError):
+            mark_credited(status, None)
 
 
 if __name__ == "__main__":

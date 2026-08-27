@@ -1,0 +1,123 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_crewai_1",
+      "provider": "agent_crewai",
+      "config": {
+        "agent_description": "Drafts a dispute/refund-claim packet for an electricity billing Finding, grounded strictly in the given facts and citation.",
+        "instructions": [
+          "You are drafting a formal dispute packet for PowerAudit AI, on behalf of an Indian commercial/industrial electricity consumer, to submit to their DISCOM.",
+          "You will be given: the Finding being disputed (type, rupee impact, confidence), the meter and billing period it concerns, and a tariff citation.",
+          "Write a concise, professional dispute packet (a short letter, 3-5 paragraphs): state the meter/billing period, describe the discrepancy in plain terms, state the rupee amount being disputed, and quote the given citation VERBATIM inside quotation marks as the basis for the dispute - do not paraphrase, shorten, or alter the citation text in any way, and do not invent or add any other citation.",
+          "Do not invent facts, dates, or figures not given to you. If the citation is marked as a placeholder/stub, include it exactly as given anyway and do not pretend it is a real tariff clause.",
+          "End with a line stating this packet is a DRAFT pending named human approval before filing."
+        ],
+        "require_tool_call": false,
+        "advanced_mode": false,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 86
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_gemini_1",
+      "provider": "llm_gemini",
+      "config": {
+        "profile": "models-gemini-3-5-flash-lite",
+        "models-gemini-3-5-flash-lite": {
+          "apikey": "${ROCKETRIDE_GEMINI_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_crewai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 360
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_crewai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "e2f4a8c6-1b7d-4e93-8c5f-9a2d6e4b7c31",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

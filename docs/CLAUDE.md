@@ -303,6 +303,22 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   Feature 3; the bill table is now exactly 33 rows (14 from the 18 Feature 1
   synthetic fixtures - 4 rejected - plus 19 from Feature 3's T01/T02/T03
   history, matching design intent exactly).
+- **`guardrails` is an AI-safety content filter, not a human-approval
+  workflow gate.** Section 4 assumed it implements "holds for a named
+  facilities approver" - the real node checks prompt injection, PII
+  leakage, hallucination, and content safety on LLM input/output
+  (`policy_mode`: block/warn/log). It has no concept of routing to a named
+  human or waiting for their sign-off. Feature 4's approval gate is instead
+  a `Claim.status` state machine (`calculators/claim_workflow.py`) enforced
+  in code: `approve_claim()` structurally cannot succeed without a
+  non-empty approver name, and there is no function that transitions
+  `draft` straight to `approved_ready_to_file`.
+- **Section 3's `Claim` table had no column for the composed dispute
+  packet text** (only `status`/`contract_impacting`/`approver`/
+  `credited_amount`). Added `draft_packet TEXT` (confirmed with the user
+  before altering the schema) - needed for the packet to be shown/reused
+  later (e.g. Feature 5's dashboard, or actually filing it), not just
+  printed once at draft time and discarded.
 
 ---
 

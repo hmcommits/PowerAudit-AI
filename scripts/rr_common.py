@@ -14,6 +14,10 @@ TREND_RECOMMENDATION_PROJECT_ID = "c9e1b5d7-8a4f-4e12-9c6d-3b7a5f2e9d84"
 TREND_RECOMMENDATION_SOURCE = "chat_1"
 TREND_RECOMMENDATION_PIPE_PATH = os.path.join(os.path.dirname(__file__), "..", "pipelines", "trend-recommendation.pipe")
 
+CLAIM_COMPOSER_PROJECT_ID = "e2f4a8c6-1b7d-4e93-8c5f-9a2d6e4b7c31"
+CLAIM_COMPOSER_SOURCE = "chat_1"
+CLAIM_COMPOSER_PIPE_PATH = os.path.join(os.path.dirname(__file__), "..", "pipelines", "claim-composer.pipe")
+
 VECTOR_COLLECTION = "tariff_orders"
 VECTOR_INGEST_PROJECT_ID = "d1e9c2b7-6a4f-4e21-9c3a-7b5d2f8e1a44"
 VECTOR_QUERY_PROJECT_ID = "f4a7d3c1-2b6e-4a95-8f1d-3c9b6e4a7f22"
@@ -279,6 +283,64 @@ def build_trend_recommendation_pipeline():
         "components": [chat_1, agent_crewai_1, llm_gemini_1, response_1],
         "source": "chat_1",
         "project_id": TREND_RECOMMENDATION_PROJECT_ID,
+        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "version": 1,
+    }
+
+
+def build_claim_composer_pipeline():
+    # Feature 4 step 1: drafts a dispute packet grounded in a real Finding.
+    # Like trend-recommendation.pipe, agent_crewai's free-text `instructions`
+    # is a real prompt-control surface (unlike extract_data/extract_facts) -
+    # but here the caller-supplied citation text must be reproduced VERBATIM
+    # (it's STUB_CITATION today, a real tariff clause once Vector is fixed),
+    # not paraphrased - the instructions say so explicitly.
+    chat_1 = node(
+        "chat_1",
+        "chat",
+        {"hideForm": True, "mode": "Source", "parameters": {}, "type": "chat"},
+    )
+    agent_crewai_1 = node(
+        "agent_crewai_1",
+        "agent_crewai",
+        {
+            "agent_description": "Drafts a dispute/refund-claim packet for an electricity billing Finding, grounded strictly in the given facts and citation.",
+            "instructions": [
+                "You are drafting a formal dispute packet for PowerAudit AI, on behalf of an Indian commercial/industrial electricity consumer, to submit to their DISCOM.",
+                "You will be given: the Finding being disputed (type, rupee impact, confidence), the meter and billing period it concerns, and a tariff citation.",
+                "Write a concise, professional dispute packet (a short letter, 3-5 paragraphs): state the meter/billing period, describe the discrepancy in plain terms, state the rupee amount being disputed, and quote the given citation VERBATIM inside quotation marks as the basis for the dispute - do not paraphrase, shorten, or alter the citation text in any way, and do not invent or add any other citation.",
+                "Do not invent facts, dates, or figures not given to you. If the citation is marked as a placeholder/stub, include it exactly as given anyway and do not pretend it is a real tariff clause.",
+                "End with a line stating this packet is a DRAFT pending named human approval before filing.",
+            ],
+            "require_tool_call": False,
+            "advanced_mode": False,
+            "parameters": {},
+        },
+        input_=[{"lane": "questions", "from": "chat_1"}],
+        ui={"position": {"x": 240, "y": 200}, "measured": {"width": 150, "height": 86}, "nodeType": "default", "formDataValid": True},
+    )
+    llm_gemini_1 = node(
+        "llm_gemini_1",
+        "llm_gemini",
+        {
+            "profile": "models-gemini-3-5-flash-lite",
+            "models-gemini-3-5-flash-lite": {"apikey": "${ROCKETRIDE_GEMINI_KEY}"},
+            "parameters": {},
+        },
+        control=[{"classType": "llm", "from": "agent_crewai_1"}],
+        ui={"position": {"x": 240, "y": 360}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+    )
+    response_1 = node(
+        "response_answers_1",
+        "response_answers",
+        {"laneName": "answers"},
+        input_=[{"lane": "answers", "from": "agent_crewai_1"}],
+        ui={"position": {"x": 460, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+    )
+    return {
+        "components": [chat_1, agent_crewai_1, llm_gemini_1, response_1],
+        "source": "chat_1",
+        "project_id": CLAIM_COMPOSER_PROJECT_ID,
         "viewport": {"x": 0, "y": 0, "zoom": 1},
         "version": 1,
     }
