@@ -23,7 +23,6 @@ import ast
 import asyncio
 import os
 import sys
-import uuid
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -61,8 +60,39 @@ async def fetch_bills(client, token):
     return r["rows"]
 
 
-async def clear_findings(client, token):
-    await client.database.query(token=token, sql="DELETE FROM finding")
+async def upsert_finding(client, token, bill_id, meter_id, finding):
+    """Insert or update the Finding for (bill_id, type) - NOT a blanket
+    DELETE FROM finding + fresh INSERT (what this function replaced). Found
+    by testing Feature 5's interactive upload against real data: a finding
+    that already has a Claim referencing it (claim.finding_id REFERENCES
+    finding.finding_id) can't be deleted without an FK violation. Looking
+    up the existing row first and UPDATEing it in place preserves whatever
+    finding_id it already has (and therefore any Claim's FK reference);
+    only a genuinely new (bill_id, type) combination gets a fresh
+    deterministic finding_id. See src/lib/billIngestion.ts (Feature 5) for
+    the TypeScript port of this same fix."""
+    existing = await client.database.query(
+        token=token,
+        sql="SELECT finding_id FROM finding WHERE bill_id = $1 AND type = $2",
+        params=[bill_id, finding["type"]],
+    )
+    if existing["rows"]:
+        await client.database.query(
+            token=token,
+            sql="UPDATE finding SET rupee_impact = $1, confidence = $2, tariff_citation = $3 WHERE finding_id = $4",
+            params=[finding["rupee_impact"], finding["confidence"], STUB_CITATION, existing["rows"][0]["finding_id"]],
+        )
+        return existing["rows"][0]["finding_id"]
+    finding_id = f"finding-{bill_id}-{finding['type']}"
+    await client.database.query(
+        token=token,
+        sql=(
+            "INSERT INTO finding (finding_id, bill_id, meter_id, type, rupee_impact, "
+            "confidence, tariff_citation) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+        ),
+        params=[finding_id, bill_id, meter_id, finding["type"], finding["rupee_impact"], finding["confidence"], STUB_CITATION],
+    )
+    return finding_id
 
 
 async def main():
@@ -72,7 +102,6 @@ async def main():
         token = await ensure_foundation_sql_token(client)
         print("foundation-sql task token:", token)
 
-        await clear_findings(client, token)
         bills = await fetch_bills(client, token)
         print(f"Recalculating {len(bills)} bills...")
 
@@ -113,18 +142,7 @@ async def main():
 
             written = []
             for finding in findings:
-                finding_id = f"finding-{uuid.uuid4().hex[:12]}"
-                await client.database.query(
-                    token=token,
-                    sql=(
-                        "INSERT INTO finding (finding_id, bill_id, meter_id, type, rupee_impact, "
-                        "confidence, tariff_citation) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-                    ),
-                    params=[
-                        finding_id, bill["bill_id"], bill["meter_id"], finding["type"],
-                        finding["rupee_impact"], finding["confidence"], STUB_CITATION,
-                    ],
-                )
+                await upsert_finding(client, token, bill["bill_id"], bill["meter_id"], finding)
                 written.append(f"{finding['type']}: rupee_impact={finding['rupee_impact']} confidence={finding['confidence']} ({finding['detail']})")
 
             status = "FINDINGS" if written else "CLEAN"

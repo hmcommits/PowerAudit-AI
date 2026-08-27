@@ -350,6 +350,56 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   build failure is not a substitute for the actual compiler output - once
   the real toolchain is available, always run it directly rather than
   reasoning about what the error might be.
+- **Interactive upload (Feature 5) required persisting `ROCKETRIDE_GEMINI_KEY`
+  server-side.** The browser app has no local `.env` to read from; the
+  Python scripts' client-side `.env` substitution doesn't apply. Called
+  `client.account.set_env('user', {'ROCKETRIDE_GEMINI_KEY': ...})` once
+  (Python) to persist it as a USER-scope server-side environment layer
+  (any org member can write their own user scope, no admin needed) - now
+  `${ROCKETRIDE_GEMINI_KEY}` resolves correctly for `client.use()` calls
+  from the app, the same way it already did for the dev scripts' pipelines.
+- **No RocketRide pipeline node runs arbitrary deterministic Python on
+  demand, so Feature 2's calculators (`calculators/*.py`) are manually
+  ported to TypeScript** (`apps/poweraudit-ai-ui/src/lib/calculators.ts`,
+  `stubTariff.ts`) for the interactive upload flow - the browser can't
+  execute the Python scripts directly, and `tool_python`'s direct-invoke
+  path doesn't work (see the earlier `tool_python` entry). Same formulas,
+  same constants, same thresholds, verified to produce identical output to
+  the Python originals against the same real data (e.g. `clean_01_M001.pdf`
+  recalculates to the exact Rs.4,125 pf-penalty finding either way). This
+  is a real, hand-maintained duplication - keep both in sync if either
+  changes; there's no way to share the source given the runtime split.
+- **Fixed a second FK-violation bug, found by testing the interactive
+  upload against real data (not caught by unit tests or a clean build):**
+  recalculating a bill by DELETE-ing its Findings and reinserting fresh
+  ones (what both `scripts/recalculate_bills.py` and the first version of
+  `billIngestion.ts`'s `recalculateBill()` did) fails once any Finding has
+  a Claim referencing it (`claim.finding_id REFERENCES finding.finding_id`)
+  - confirmed concretely: `bill-clean_01_M001`'s finding has
+  `claim-644921821dd9` (Feature 4's demo, since advanced to
+  `approved_ready_to_file`) pointing at it, and the upload test's first run
+  hit exactly this violation. Fixed in both places the same way: look up
+  any existing Finding for the natural key `(bill_id, type)` first (
+  `detectVariances`/`detect_variances` returns at most one variance per
+  type, so this is collision-free) and UPDATE it in place - preserving
+  whatever `finding_id` it already has, so any Claim's FK reference
+  survives - rather than assuming a fixed id scheme; only a genuinely new
+  `(bill_id, type)` combination gets a fresh deterministic
+  `finding-{bill_id}-{type}` id. Re-ran the full `recalculate_bills.py`
+  batch afterward to confirm: 30 findings, zero duplicates, both existing
+  Claims (`claim-644921821dd9`, `claim-95fb1ae7a5df`) still correctly
+  linked.
+- **Known limitation, not fixed:** the per-bill upsert (both the Python and
+  TypeScript versions) only inserts/updates Findings the CURRENT
+  recalculation actually detects - unlike the old blanket
+  `DELETE FROM finding` + reinsert, it does not clean up a Finding whose
+  variance no longer applies (e.g. a bill re-extracted with corrected data
+  that no longer has a math-error). Doesn't affect the current dataset
+  (no bill's variances have actually changed between runs), but a future
+  session correcting a previously-wrong extraction and re-running
+  recalculation should be aware stale Findings can persist - would need an
+  explicit "delete Findings of types NOT in this run's result AND with no
+  Claim referencing them" step, not built.
 
 ---
 

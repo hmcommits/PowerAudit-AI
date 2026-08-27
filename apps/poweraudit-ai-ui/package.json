@@ -16,7 +16,10 @@
     ],
     "mode": "free",
     "authenticated": false,
-    "projectId": "5dba93f7-717a-4541-84aa-9774c0ee06b5"
+    "projectId": "5dba93f7-717a-4541-84aa-9774c0ee06b5",
+    "include": [
+      "pipelines"
+    ]
   },
   "scripts": {
     "dev": "rsbuild dev",
