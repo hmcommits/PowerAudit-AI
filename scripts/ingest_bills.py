@@ -1,0 +1,194 @@
+"""Feature 1: run every synthetic bill through bill-ingestion.pipe, validate
+the extracted fields (the "Schema Validate" step - plain Python, since no
+pipeline node does generic numeric plausibility checks; see project notes),
+and write Bill rows to RocketRide SQL via the foundation-sql pipeline.
+
+Three outcomes per bill, printed in the summary:
+  - OK            : all checks passed, written with needs_review = false
+  - NEEDS_REVIEW  : meter resolved, written with needs_review = true + reasons
+  - REJECTED      : meter_number missing/unknown - no valid FK target, so no
+                    Bill row can be written at all (correct relational
+                    behavior, not a bug) - reported for human follow-up
+"""
+import asyncio
+import glob
+import os
+import re
+import sys
+import uuid
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from rocketride import RocketRideClient
+from rr_common import BILL_INGESTION_PROJECT_ID, BILL_INGESTION_SOURCE, ensure_foundation_sql_token
+
+BILLS_DIR = os.path.join(os.path.dirname(__file__), "synthetic_bills")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def to_number(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def validate_bill(fields):
+    """Plain-Python "Schema Validate": returns (needs_review: bool, reasons: list[str])."""
+    reasons = []
+
+    recorded_md = to_number(fields.get("recorded_md"))
+    if recorded_md is None:
+        reasons.append("recorded_md missing or unparseable")
+    elif recorded_md < 0:
+        reasons.append(f"recorded_md is negative ({recorded_md})")
+
+    recorded_pf = to_number(fields.get("recorded_pf"))
+    if recorded_pf is None:
+        reasons.append("recorded_pf missing or unparseable")
+    elif not (0 <= recorded_pf <= 1.0):
+        reasons.append(f"recorded_pf out of [0,1] range ({recorded_pf})")
+
+    period_start = fields.get("period_start") or ""
+    period_end = fields.get("period_end") or ""
+    if not DATE_RE.match(str(period_start)):
+        reasons.append(f"period_start missing or not ISO date ({period_start!r})")
+    if not DATE_RE.match(str(period_end)):
+        reasons.append(f"period_end missing or not ISO date ({period_end!r})")
+    if DATE_RE.match(str(period_start)) and DATE_RE.match(str(period_end)) and period_end < period_start:
+        reasons.append(f"billing period reversed (end {period_end} before start {period_start})")
+
+    total_due = to_number(fields.get("total_due"))
+    if total_due is None:
+        reasons.append("total_due missing or unparseable")
+    elif total_due < 0:
+        reasons.append(f"total_due is negative ({total_due})")
+
+    if not fields.get("line_items"):
+        reasons.append("line_items missing or empty")
+
+    return (len(reasons) > 0, reasons)
+
+
+def extract_fields(send_result_entry):
+    """Pull the extract_data answer dict out of one send_files() result entry."""
+    if send_result_entry.get("action") != "complete":
+        return None, send_result_entry.get("error")
+    result = send_result_entry.get("result") or {}
+    if "error" in result:
+        return None, result["error"]
+    answers = result.get("answers")
+    try:
+        fields = answers[0][0]
+    except (TypeError, IndexError, KeyError):
+        fields = None
+    if not fields:
+        return {}, None
+    return fields, None
+
+
+async def main():
+    client = RocketRideClient(persist=True)
+    await client.connect()
+    try:
+        sql_token = await ensure_foundation_sql_token(client)
+        print("foundation-sql task token:", sql_token)
+
+        from rr_common import build_bill_ingestion_pipeline
+
+        try:
+            existing = await client.get_task_token(project_id=BILL_INGESTION_PROJECT_ID, source=BILL_INGESTION_SOURCE)
+        except RuntimeError:
+            existing = None
+        if existing:
+            await client.terminate(existing)
+        pipeline = build_bill_ingestion_pipeline()
+        use_result = await client.use(pipeline=pipeline, source="dropper_1", ttl=1800, name="bill-ingestion")
+        bill_token = use_result["token"]
+        print("bill-ingestion pipeline started:", bill_token)
+
+        paths = sorted(glob.glob(os.path.join(BILLS_DIR, "*")))
+        print(f"Sending {len(paths)} bills (parallel batch, per Feature 6's batch requirement)...")
+        results = await client.send_files(paths, bill_token)
+
+        summary = []
+        for path, entry in zip(paths, results):
+            name = os.path.basename(path)
+            fields, err = extract_fields(entry)
+
+            if err is not None:
+                summary.append((name, "ERROR", [f"pipeline error: {err}"], None))
+                continue
+
+            meter_number = (fields or {}).get("meter_number") or ""
+            meter_row = None
+            if meter_number:
+                r = await client.database.query(
+                    token=sql_token,
+                    sql="SELECT meter_id FROM meter WHERE meter_id = $1",
+                    params=[meter_number],
+                )
+                if r["rows"]:
+                    meter_row = r["rows"][0]["meter_id"]
+
+            needs_review, reasons = validate_bill(fields or {})
+
+            if not meter_number:
+                reasons = ["meter_number missing or unreadable"] + reasons
+                summary.append((name, "REJECTED", reasons, None))
+                continue
+            if not meter_row:
+                reasons = [f"unknown meter_number '{meter_number}' (no matching Meter record)"] + reasons
+                summary.append((name, "REJECTED", reasons, None))
+                continue
+
+            bill_id = f"bill-{uuid.uuid4().hex[:12]}"
+            import json as _json
+
+            await client.database.query(
+                token=sql_token,
+                sql=(
+                    "INSERT INTO bill (bill_id, meter_id, period_start, period_end, "
+                    "recorded_md, recorded_pf, line_items, total_due, source_doc_ref, needs_review) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                ),
+                params=[
+                    bill_id,
+                    meter_row,
+                    fields.get("period_start") or None,
+                    fields.get("period_end") or None,
+                    to_number(fields.get("recorded_md")),
+                    to_number(fields.get("recorded_pf")),
+                    _json.dumps(fields.get("line_items") or []),
+                    to_number(fields.get("total_due")),
+                    name,
+                    needs_review,
+                ],
+            )
+            status = "NEEDS_REVIEW" if needs_review else "OK"
+            summary.append((name, status, reasons, bill_id))
+
+        print("\n--- Ingestion summary ---")
+        for name, status, reasons, bill_id in summary:
+            line = f"{status:12} {name:32} {'bill_id=' + bill_id if bill_id else ''}"
+            print(line)
+            for reason in reasons:
+                print(f"             - {reason}")
+
+        counts = {}
+        for _, status, _, _ in summary:
+            counts[status] = counts.get(status, 0) + 1
+        print("\nCounts:", counts)
+
+        r = await client.database.query(token=sql_token, sql="SELECT count(*) AS n FROM bill")
+        print("bill table row count:", r["rows"][0]["n"])
+    finally:
+        await client.disconnect()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

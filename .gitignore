@@ -8,3 +8,6 @@
 # Python
 **/__pycache__/
 *.pyc
+
+# Deterministically regenerated test fixtures (python scripts/make_synthetic_bills.py)
+scripts/synthetic_bills/

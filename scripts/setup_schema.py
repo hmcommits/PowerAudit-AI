@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from rocketride import RocketRideClient
-from rr_common import FOUNDATION_PROJECT_ID, FOUNDATION_SOURCE
+from rr_common import ensure_foundation_sql_token
 
 DDL = [
     """
@@ -109,11 +109,8 @@ async def main():
     client = RocketRideClient()
     await client.connect()
     try:
-        token = await client.get_task_token(project_id=FOUNDATION_PROJECT_ID, source=FOUNDATION_SOURCE)
-        if not token:
-            print("No running foundation-sql task found. Run scripts/start_foundation.py first.")
-            return
-        print("Using running task token:", token)
+        token = await ensure_foundation_sql_token(client)
+        print("Using task token:", token)
 
         # Note: the installed PyPI `rocketride` client lags the server and doesn't
         # expose begin_transaction/commit/rollback (only dialect/query) - see
