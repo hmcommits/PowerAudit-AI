@@ -18,7 +18,12 @@ interface MeterRow {
 	contract_demand_kva: number;
 }
 
+// Index signatures below are for CardDataGrid's Record<string, unknown>[]
+// `data` prop - tsc's structural check requires it explicitly, even though
+// every field is also declared for our own type safety when reading rows.
+
 interface BillRow {
+	[key: string]: unknown;
 	bill_id: string;
 	period_start: string;
 	period_end: string;
@@ -31,6 +36,7 @@ interface BillRow {
 }
 
 interface FindingRow {
+	[key: string]: unknown;
 	finding_id: string;
 	bill_id: string;
 	type: string;
@@ -41,6 +47,7 @@ interface FindingRow {
 }
 
 interface AlertRow {
+	[key: string]: unknown;
 	alert_id: string;
 	trend_type: string;
 	projected_impact: number | null;
@@ -49,6 +56,7 @@ interface AlertRow {
 }
 
 interface ClaimRow {
+	[key: string]: unknown;
 	claim_id: string;
 	finding_id: string;
 	status: string;

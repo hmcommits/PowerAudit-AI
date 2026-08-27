@@ -12,7 +12,11 @@
  * against a "tools"-hosted task, never by embedding SQL in a .pipe node).
  */
 
-import type { RocketRideClient } from 'rocketride';
+// Typed against 'shell's RocketRideClient, not 'rocketride's - useShellConnection()
+// returns the shell's own client instance/type, and the two packages' type
+// declarations have drifted slightly (shell's is missing a couple of newer
+// methods) even though they're structurally the same client at runtime.
+import type { RocketRideClient } from 'shell';
 
 export const FOUNDATION_PROJECT_ID = 'b3f2a6b4-9b0d-4c3a-8e77-4a2f6a1c9d10';
 export const FOUNDATION_SOURCE = 'tools_1';

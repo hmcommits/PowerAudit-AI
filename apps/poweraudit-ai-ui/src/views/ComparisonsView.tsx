@@ -9,6 +9,7 @@ import type { GridColumnDefinition } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
 
 interface MeterStatsRow {
+	[key: string]: unknown;
 	meter_id: string;
 	site_name: string;
 	discom: string;
