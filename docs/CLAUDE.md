@@ -330,19 +330,26 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   before altering the schema) - needed for the packet to be shown/reused
   later (e.g. Feature 5's dashboard, or actually filing it), not just
   printed once at draft time and discarded.
-- **Feature 5's app code could not be built/typechecked in this environment.**
-  `corepack enable` (needed to get `pnpm` on PATH, per the project's own
-  "pnpm required, never npm for the app toolchain" rule) failed with
-  `EPERM` writing into `Program Files\nodejs` - this machine's shell isn't
-  running elevated. `apps/poweraudit-ai-ui/src/{App.tsx,lib/,views/}` were
-  written carefully against `ROCKETRIDE_UI_COMPONENTS.md`/`ROCKETRIDE_APPS.md`
-  and the underlying SQL queries were verified directly (via the Python
-  client) to return correct data, but `tsc --noEmit`/`rsbuild build` were
-  never actually run against this code - opening the App Builder panel in
-  VS Code (which runs its own pnpm-based dev loop, per `ROCKETRIDE_APPS.md`'s
-  "The Dev Loop" section) is the first real compile/typecheck this code
-  gets. If `pnpm`/admin rights become available in a future session, prefer
-  running the real build before claiming app code works.
+- **Resolved: Feature 5's app code was written and pushed once (`fca6340`)
+  without ever running `tsc`/`rsbuild`** - `corepack enable` (needed for
+  `pnpm`, per the project's own "never npm for the app toolchain" rule)
+  failed with `EPERM` in that session (shell not elevated). It built and
+  rendered in the App Builder's Design tab preview at first, then started
+  failing with "rsbuild build failed" on a later rebuild with no code
+  change - i.e. the preview's own dev-loop compile was the first real
+  compile this code ever got, and it failed. Once `pnpm`/`corepack` were
+  fixed, running `pnpm install` + `pnpm run build` directly in
+  `apps/poweraudit-ai-ui` (commit `59e337c`) surfaced two genuine `tsc`
+  errors immediately: (1) `RocketRideClient`'s type must be imported from
+  `'shell'`, not `'rocketride'` - the two packages' bundled type
+  declarations have drifted even though they're the same client at
+  runtime, and `useShellConnection()` returns shell's own type; (2) row
+  interfaces passed as `CardDataGrid`'s `data` prop need an explicit
+  `[key: string]: unknown` index signature to satisfy its
+  `Record<string, unknown>[]` type. Lesson: a summary message describing a
+  build failure is not a substitute for the actual compiler output - once
+  the real toolchain is available, always run it directly rather than
+  reasoning about what the error might be.
 
 ---
 
