@@ -281,6 +281,17 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   `ast.literal_eval()` instead of `json.loads()` on any `jsonb` column read
   back this way (safe here since it's our own application data, not
   external input) - see `scripts/recalculate_bills.py`.
+  **Confirmed to affect the TypeScript SDK identically** (Feature 5): a
+  standalone Node script using the vendored `rocketride.tgz` and
+  `client.database.query({ token, sql })` against the same `bill.line_items`
+  column returned the exact same single-quoted Python-repr string (e.g.
+  `"[{'amount': 100000, 'description': 'Energy Charge'}]"`), not JSON - so
+  it's a server-side response-serialization bug shared by both SDKs, not a
+  client-specific one. The dashboard app's `src/lib/db.ts` ports the same
+  fix as a hand-rolled `parsePyLiteral()` (TypeScript has no `ast.literal_eval`
+  equivalent, so this is a small recursive-descent parser for Python literal
+  syntax - dict/list/str/number/True/False/None), used only for reading
+  `line_items` back for display, never for reading external/untrusted data.
 - **`get_task_status()`'s `state` field is an integer code, not the
   documented string enum.** `ROCKETRIDE_python_API.md` says `state` is one
   of `'starting'`/`'running'`/`'waiting'`/`'completed'`/`'failed'`/
@@ -319,6 +330,19 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   before altering the schema) - needed for the packet to be shown/reused
   later (e.g. Feature 5's dashboard, or actually filing it), not just
   printed once at draft time and discarded.
+- **Feature 5's app code could not be built/typechecked in this environment.**
+  `corepack enable` (needed to get `pnpm` on PATH, per the project's own
+  "pnpm required, never npm for the app toolchain" rule) failed with
+  `EPERM` writing into `Program Files\nodejs` - this machine's shell isn't
+  running elevated. `apps/poweraudit-ai-ui/src/{App.tsx,lib/,views/}` were
+  written carefully against `ROCKETRIDE_UI_COMPONENTS.md`/`ROCKETRIDE_APPS.md`
+  and the underlying SQL queries were verified directly (via the Python
+  client) to return correct data, but `tsc --noEmit`/`rsbuild build` were
+  never actually run against this code - opening the App Builder panel in
+  VS Code (which runs its own pnpm-based dev loop, per `ROCKETRIDE_APPS.md`'s
+  "The Dev Loop" section) is the first real compile/typecheck this code
+  gets. If `pnpm`/admin rights become available in a future session, prefer
+  running the real build before claiming app code works.
 
 ---
 

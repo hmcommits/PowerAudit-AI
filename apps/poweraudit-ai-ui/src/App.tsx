@@ -5,43 +5,49 @@
 
 /**
  * PowerAudit AI — root component rendered by the RocketRide shell.
+ *
+ * Feature 5: Dashboard, Comparisons & Audit Trail. Three views, all reading
+ * live data from RocketRide SQL via the shared foundation-sql pipeline
+ * (see src/lib/db.ts) - no mock/hardcoded data anywhere in this app.
  */
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import type { ShellAppProps } from 'shell';
-import { AppLayout } from 'shell';
+import { AppLayout, SidebarMenu } from 'shell';
+import { PortfolioView } from './views/PortfolioView';
+import { DrilldownView } from './views/DrilldownView';
+import { ComparisonsView } from './views/ComparisonsView';
 
-// =============================================================================
-// STYLES
-// =============================================================================
+type ViewId = 'portfolio' | 'drilldown' | 'comparisons';
 
-const styles: Record<string, React.CSSProperties> = {
-	wrap: { padding: 40, fontFamily: 'var(--rr-font-family, system-ui)' },
-	title: { fontSize: 22, fontWeight: 600, color: 'var(--rr-text-primary)' },
-	sub: { marginTop: 8, fontSize: 13, color: 'var(--rr-text-secondary)' },
+const MENU = {
+	entries: [
+		{ id: 'portfolio', label: 'Portfolio Summary' },
+		{ id: 'drilldown', label: 'Site Drill-down' },
+		{ id: 'comparisons', label: 'Comparisons' },
+	],
 };
 
-// =============================================================================
-// COMPONENT
-// =============================================================================
+const Content: React.FC<{ view: ViewId }> = ({ view }) => {
+	if (view === 'drilldown') return <DrilldownView />;
+	if (view === 'comparisons') return <ComparisonsView />;
+	return <PortfolioView />;
+};
 
-/** Client-area content — replace with your app. */
-const Content: React.FC<ShellAppProps> = ({ isConnected, identity }) => (
-	<div style={styles.wrap}>
-		<h1 style={styles.title}>PowerAudit AI</h1>
-		<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
-		<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
-	</div>
-);
+const App: React.FC<ShellAppProps> = () => {
+	const [view, setView] = useState<ViewId>('portfolio');
 
-/**
- * Root view — AppLayout declares the frame the wizard selected; recompose
- * its props (`sidebar`, `showStatus`) to change it.
- */
-const App: React.FC<ShellAppProps> = (props) => (
-	<AppLayout>
-		<Content {...props} />
-	</AppLayout>
-);
+	// Stable node - the shell dedupes sidebar registrations by node identity.
+	const sidebar = useMemo(
+		() => <SidebarMenu menu={MENU} activeId={view} onSelect={(id) => setView(id as ViewId)} sectionLabel="PowerAudit AI" />,
+		[view],
+	);
+
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<Content view={view} />
+		</AppLayout>
+	);
+};
 
 export default App;
