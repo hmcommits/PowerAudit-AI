@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Staging Test",
+      "type": "msedge",
+      "request": "launch",
+      "url": "https://staging.rocketride.ai:443/?appid=local.staging-test&rrdev=1",
+      "webRoot": "${workspaceFolder}/apps/staging-test-ui",
+      "sourceMapPathOverrides": {
+        "webpack:///./*": "${workspaceFolder}/apps/staging-test-ui/*",
+        "webpack:///*": "*"
+      }
+    },
+    {
+      "name": "Debug PowerAudit AI",
+      "type": "msedge",
+      "request": "launch",
+      "url": "https://staging.rocketride.ai:443/?appid=poweraudit.poweraudit-ai&rrdev=1",
+      "webRoot": "${workspaceFolder}/apps/poweraudit-ai-ui",
+      "sourceMapPathOverrides": {
+        "webpack:///./*": "${workspaceFolder}/apps/poweraudit-ai-ui/*",
+        "webpack:///*": "*"
+      }
+    }
+  ]
+}
