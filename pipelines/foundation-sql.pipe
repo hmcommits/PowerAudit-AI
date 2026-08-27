@@ -1,0 +1,95 @@
+{
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "rocketride_sql_1",
+      "provider": "rocketride_sql",
+      "config": {
+        "profile": "default",
+        "default": {
+          "db_description": "PowerAudit AI relational store: Site, Meter, TariffOrder, Bill, Finding, Alert, Claim tables for auditing Indian commercial/industrial electricity bills (MD/PF penalty recalculation, disputes, claims).",
+          "table": "_direct_execute",
+          "max_attempts": 5,
+          "allow_execute": true
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 135
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_gemini_1",
+      "provider": "llm_gemini",
+      "config": {
+        "profile": "gemini-2_5-flash-lite",
+        "5-flash-lite": {
+          "apikey": "${ROCKETRIDE_GEMINI_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "rocketride_sql_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 360
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "source": "tools_1",
+  "project_id": "b3f2a6b4-9b0d-4c3a-8e77-4a2f6a1c9d10",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
