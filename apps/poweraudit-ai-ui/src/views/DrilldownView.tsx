@@ -9,6 +9,7 @@ import type { GridColumnDefinition, RocketRideClient } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
 import { parseLineItems } from '../lib/db';
 import { approveClaimAction } from '../lib/claimActions';
+import { Badge, ClaimStatusBadge, FindingTypeBadge, LoadingState, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE, findingTypeHtml, moneyHtml } from '../lib/uiKit';
 
 interface MeterRow {
 	site_id: string;
@@ -74,16 +75,6 @@ const METERS_SQL = `
 	FROM site s JOIN meter m ON m.site_id = s.site_id
 	ORDER BY s.site_id, m.meter_id
 `;
-
-const CLAIM_STATUS_VARIANT: Record<string, 'success' | 'info' | 'warning' | 'error' | 'muted'> = {
-	draft: 'muted',
-	pending_approval: 'warning',
-	approved_ready_to_file: 'info',
-	filed: 'info',
-	under_discom_review: 'warning',
-	credited: 'success',
-	denied: 'error',
-};
 
 export const DrilldownView: React.FC = () => {
 	const meters = useSqlQuery<MeterRow>(METERS_SQL);
@@ -172,7 +163,14 @@ export const DrilldownView: React.FC = () => {
 				tooltip: true,
 				minWidth: 130,
 			},
-			{ title: 'Type', field: 'type', rrType: 'enum', rrDefault: true, rrDescription: "Finding category (Section 3's enum)." },
+			{
+				title: 'Type',
+				field: 'type',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: "Finding category (Section 3's enum) - md-penalty, pf-penalty, or math-error.",
+				formatter: (cell: any) => findingTypeHtml(cell.getValue()),
+			},
 			{
 				title: 'Rupee impact',
 				field: 'rupee_impact',
@@ -182,16 +180,11 @@ export const DrilldownView: React.FC = () => {
 					'Positive = consumer overcharged, a real actionable finding worth disputing. Negative = undercharged - not disputable, shown muted so it does not read as an action item.',
 				minWidth: 110,
 				// Muted/gray for a negative (undercharge, not disputable) impact;
-				// normal weight for a positive (real, dispute-worthy) one - so
-				// which findings are actually worth acting on is visible at a
-				// glance, not just from the sign of a number.
-				formatter: (cell: any) => {
-					const raw = cell.getValue();
-					const num = Number(raw);
-					if (!Number.isFinite(num)) return raw == null ? '-' : String(raw);
-					const text = `Rs. ${num.toLocaleString('en-IN')}`;
-					return num > 0 ? `<span style="font-weight:700;">${text}</span>` : `<span style="color:var(--rr-text-secondary, #888);">${text}</span>`;
-				},
+				// large/bold/accented for a positive (real, dispute-worthy) one -
+				// this is the number the whole product exists to surface, so it
+				// should never look like plain metadata (see uiKit.tsx's
+				// moneyHtml, reused across every view).
+				formatter: (cell: any) => moneyHtml(cell.getValue(), { mutedIfNonPositive: true }),
 			},
 			{ title: 'Confidence', field: 'confidence', rrType: 'number', rrDefault: true, rrDescription: 'Extraction confidence backing this Finding, 0-1.' },
 			{ title: 'Tariff citation', field: 'tariff_citation', rrType: 'string', rrDescription: 'The tariff clause backing the recalculation (stub pending the Vector fix - see docs/CLAUDE.md Backlog).', tooltip: true },
@@ -224,6 +217,7 @@ export const DrilldownView: React.FC = () => {
 				}
 			/>
 			{meters.error && <Banner variant="error">{meters.error}</Banner>}
+			{!meters.error && meters.loading && !meters.rows && <LoadingState label="Loading meters…" />}
 			{!meters.error && meters.rows && meters.rows.length === 0 && (
 				<EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py to populate RocketRide SQL." />
 			)}
@@ -238,9 +232,7 @@ export const DrilldownView: React.FC = () => {
 								}, {}),
 							).map(([siteName, siteMeters]) => (
 								<div key={siteName}>
-									<div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--rr-text-secondary)' }}>
-										{siteName}
-									</div>
+									<div style={{ padding: '8px 12px', ...SECTION_LABEL_STYLE }}>{siteName}</div>
 									{siteMeters.map((m) => (
 										<div
 											key={m.meter_id}
@@ -253,7 +245,7 @@ export const DrilldownView: React.FC = () => {
 											}}
 										>
 											<div style={{ fontWeight: 600 }}>{m.meter_id}</div>
-											<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)' }}>
+											<div style={SUBTLE_TEXT_STYLE}>
 												{m.discom} · {m.tariff_category} · CD {m.contract_demand_kva} kVA
 											</div>
 										</div>
@@ -304,7 +296,14 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
 			</Card>
 		);
 	}
-	if (!loading && rows && rows.length === 0) {
+	if (loading && !rows) {
+		return (
+			<Card header={title}>
+				<LoadingState label={`Loading ${title.toLowerCase()}…`} />
+			</Card>
+		);
+	}
+	if (rows && rows.length === 0) {
 		return (
 			<Card header={title}>
 				<EmptyState title={emptyLabel} />
@@ -312,24 +311,6 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
 		);
 	}
 	return <CardDataGrid tableId={`drilldown-${title.toLowerCase()}`} title={title} columns={columns} data={rows ?? []} paginate={false} noSearch />;
-}
-
-const BADGE_COLORS: Record<'success' | 'info' | 'warning' | 'error' | 'muted', { bg: string; fg: string }> = {
-	success: { bg: 'var(--rr-color-success-bg, rgba(34,197,94,0.15))', fg: 'var(--rr-color-success, #16a34a)' },
-	info: { bg: 'var(--rr-color-info-bg, rgba(59,130,246,0.15))', fg: 'var(--rr-color-info, #2563eb)' },
-	warning: { bg: 'var(--rr-color-warning-bg, rgba(234,179,8,0.15))', fg: 'var(--rr-color-warning, #ca8a04)' },
-	error: { bg: 'var(--rr-color-error-bg, rgba(239,68,68,0.15))', fg: 'var(--rr-color-error, #dc2626)' },
-	muted: { bg: 'var(--rr-surface-secondary, rgba(128,128,128,0.15))', fg: 'var(--rr-text-secondary)' },
-};
-
-function StatusBadge({ status }: { status: string }): React.ReactElement {
-	const variant = CLAIM_STATUS_VARIANT[status] ?? 'muted';
-	const c = BADGE_COLORS[variant];
-	return (
-		<span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', background: c.bg, color: c.fg, whiteSpace: 'nowrap' }}>
-			{status}
-		</span>
-	);
 }
 
 /**
@@ -352,7 +333,14 @@ function ClaimsPanel(props: { rows: ClaimRow[] | null; error: string | null; loa
 			</Card>
 		);
 	}
-	if (!loading && rows && rows.length === 0) {
+	if (loading && !rows) {
+		return (
+			<Card header="Claims">
+				<LoadingState label="Loading claims…" />
+			</Card>
+		);
+	}
+	if (rows && rows.length === 0) {
 		return (
 			<Card header="Claims">
 				<EmptyState title="No claims drafted for this meter." />
@@ -398,16 +386,19 @@ function ClaimCard(props: { claim: ClaimRow; client: RocketRideClient | null; on
 		<div style={{ padding: 16, borderTop: isFirst ? undefined : '1px solid var(--rr-border-color, rgba(128,128,128,0.2))' }}>
 			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
 				<div>
-					<div style={{ fontWeight: 600 }}>{claim.claim_id}</div>
-					<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)' }}>
-						{claim.finding_type} · Rs. {claim.rupee_impact !== null ? claim.rupee_impact.toLocaleString('en-IN') : '?'} · from {claim.finding_id}
-						{claim.contract_impacting && ' · contract-impacting'}
+					<div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+						<MoneyValue value={claim.rupee_impact} size="lg" />
+						<FindingTypeBadge type={claim.finding_type} />
+						{claim.contract_impacting && <Badge variant="info" label="Contract impacting" />}
+					</div>
+					<div style={{ marginTop: 4, ...SUBTLE_TEXT_STYLE }}>
+						{claim.claim_id} · from {claim.finding_id}
 					</div>
 				</div>
-				<StatusBadge status={claim.status} />
+				<ClaimStatusBadge status={claim.status} />
 			</div>
 
-			<div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--rr-text-secondary)' }}>Draft dispute packet</div>
+			<div style={{ marginTop: 12, ...SECTION_LABEL_STYLE }}>Draft dispute packet</div>
 			<div
 				style={{
 					marginTop: 4,
@@ -423,9 +414,11 @@ function ClaimCard(props: { claim: ClaimRow; client: RocketRideClient | null; on
 				{claim.draft_packet || '(no packet text on this claim)'}
 			</div>
 
-			{claim.approver && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--rr-text-secondary)' }}>Approved by: {claim.approver}</div>}
+			{claim.approver && <div style={{ marginTop: 8, ...SUBTLE_TEXT_STYLE }}>Approved by: {claim.approver}</div>}
 			{claim.credited_amount !== null && claim.credited_amount !== undefined && (
-				<div style={{ marginTop: 4, fontSize: 12, color: 'var(--rr-text-secondary)' }}>Credited: Rs. {claim.credited_amount.toLocaleString('en-IN')}</div>
+				<div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, ...SUBTLE_TEXT_STYLE }}>
+					Credited: <MoneyValue value={claim.credited_amount} size="sm" />
+				</div>
 			)}
 
 			{canApprove && (

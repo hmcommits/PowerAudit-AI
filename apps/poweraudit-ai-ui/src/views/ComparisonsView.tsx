@@ -7,6 +7,7 @@ import React, { useMemo, useState } from 'react';
 import { Banner, Button, Card, CardDataGrid, ContentHeader, EmptyState, ToggleGroup } from 'shell';
 import type { GridColumnDefinition } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
+import { LoadingState, MoneyValue, SUBTLE_TEXT_STYLE, moneyHtml } from '../lib/uiKit';
 
 interface MeterStatsRow {
 	[key: string]: unknown;
@@ -82,7 +83,8 @@ export const ComparisonsView: React.FC = () => {
 				rrType: 'number',
 				rrDefault: true,
 				rrDefaultSort: 'desc',
-				rrDescription: 'Sum of positive (overcharge) rupee_impact across this meter\'s Findings.',
+				rrDescription: 'Sum of positive (overcharge) rupee_impact across this meter\'s Findings - the actual point of this product, so it renders larger/bolder/accented rather than a plain number.',
+				formatter: (cell: any) => moneyHtml(cell.getValue()),
 			},
 			{
 				title: 'Avg cost / kVA',
@@ -90,6 +92,7 @@ export const ComparisonsView: React.FC = () => {
 				rrType: 'number',
 				rrDefault: true,
 				rrDescription: 'Average Bill total_due divided by Contract Demand - an efficiency proxy (no kWh column exists to compute true cost-per-unit-of-energy).',
+				formatter: (cell: any) => moneyHtml(cell.getValue()),
 			},
 		],
 		[],
@@ -109,6 +112,7 @@ export const ComparisonsView: React.FC = () => {
 				}
 			/>
 			{stats.error && <Banner variant="error">{stats.error}</Banner>}
+			{!stats.error && stats.loading && !stats.rows && <LoadingState label="Loading comparisons…" />}
 			{!stats.error && stats.rows && stats.rows.length === 0 && <EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py first." />}
 			{!stats.error && ranked.length > 0 && (
 				<>
@@ -126,12 +130,13 @@ export const ComparisonsView: React.FC = () => {
 							/>
 						}
 					>
-						<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>{METRIC_LABEL[metric]}, worst first</div>
+						<div style={{ marginBottom: 12, ...SUBTLE_TEXT_STYLE }}>{METRIC_LABEL[metric]}, worst first</div>
 						<div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 							{ranked.map((row, idx) => {
 								const value = metricValue(row, metric);
 								const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, value > 0 ? 2 : 0) : 0;
 								const color = idx < 3 ? 'var(--rr-color-error)' : idx < 6 ? 'var(--rr-color-warning)' : 'var(--rr-color-info)';
+								const isMoney = metric !== 'penalty_count';
 								return (
 									<div key={row.meter_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
 										<div style={{ width: 64, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
@@ -140,8 +145,10 @@ export const ComparisonsView: React.FC = () => {
 										<div style={{ flex: 1, background: 'var(--rr-surface-secondary, rgba(128,128,128,0.15))', borderRadius: 4, height: 22, overflow: 'hidden' }}>
 											<div style={{ width: `${pct}%`, background: color, height: '100%', transition: 'width 200ms ease' }} />
 										</div>
-										<div style={{ width: 140, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>
-											{metric === 'penalty_count' ? value : `Rs. ${Math.round(value).toLocaleString('en-IN')}`}
+										<div style={{ width: 140, textAlign: 'right' }}>
+											{isMoney ? <MoneyValue value={value} size="md" /> : (
+												<span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+											)}
 										</div>
 									</div>
 								);

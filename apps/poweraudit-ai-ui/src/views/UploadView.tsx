@@ -8,6 +8,7 @@ import { Banner, Button, Card, ContentHeader, DropZone, useShellConnection, useS
 import { ingestBill } from '../lib/billIngestion';
 import type { IngestResult, IngestStatus } from '../lib/billIngestion';
 import billIngestionPipe from '../../../../pipelines/bill-ingestion.pipe';
+import { FindingTypeBadge, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE } from '../lib/uiKit';
 
 type Stage = 'idle' | 'uploading' | 'processing' | 'done';
 
@@ -148,9 +149,7 @@ function ResultCard({ result }: { result: IngestResult }): React.ReactElement {
 
 			{result.reasons.length > 0 && (
 				<div style={{ marginTop: 12 }}>
-					<div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--rr-text-secondary)', marginBottom: 4 }}>
-						{result.status === 'REJECTED' || result.status === 'ERROR' ? 'Reasons' : 'Flags'}
-					</div>
+					<div style={{ ...SECTION_LABEL_STYLE, marginBottom: 4 }}>{result.status === 'REJECTED' || result.status === 'ERROR' ? 'Reasons' : 'Flags'}</div>
 					<ul style={{ margin: 0, paddingLeft: 20 }}>
 						{result.reasons.map((r, i) => (
 							<li key={i} style={{ fontSize: 13 }}>
@@ -163,11 +162,26 @@ function ResultCard({ result }: { result: IngestResult }): React.ReactElement {
 
 			{result.findings && result.findings.length > 0 && (
 				<div style={{ marginTop: 16 }}>
-					<div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--rr-text-secondary)', marginBottom: 4 }}>Findings ({result.findings.length})</div>
+					<div style={{ ...SECTION_LABEL_STYLE, marginBottom: 4 }}>Findings ({result.findings.length})</div>
 					{result.findings.map((f, i) => (
-						<div key={i} style={{ padding: '8px 0', borderTop: i > 0 ? '1px solid var(--rr-border-color, rgba(128,128,128,0.2))' : undefined }}>
-							<strong>{f.type}</strong>: Rs. {f.rupeeImpact.toLocaleString('en-IN')} (confidence {f.confidence})
-							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)' }}>{f.detail}</div>
+						<div
+							key={i}
+							style={{
+								padding: '10px 0',
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								gap: 12,
+								borderTop: i > 0 ? '1px solid var(--rr-border-color, rgba(128,128,128,0.2))' : undefined,
+							}}
+						>
+							<div>
+								<FindingTypeBadge type={f.type} />
+								<div style={{ marginTop: 4, ...SUBTLE_TEXT_STYLE }}>
+									{f.detail} · confidence {f.confidence}
+								</div>
+							</div>
+							<MoneyValue value={f.rupeeImpact} size="lg" mutedIfNonPositive />
 						</div>
 					))}
 				</div>
