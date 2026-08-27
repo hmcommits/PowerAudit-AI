@@ -18,6 +18,8 @@ from calculators.bill_line_parser import (
     sum_by_category,
 )
 from calculators.tariff_penalty_calculator import calculate_md_penalty, calculate_pf_adjustment
+from calculators.variance_detector import detect_variances
+from calculators.dollar_impact_scorer import score_finding, score_findings
 
 
 class TestParseAmount(unittest.TestCase):
@@ -170,6 +172,99 @@ class TestPFAdjustment(unittest.TestCase):
         self.assertEqual(result["type"], "surcharge")
         self.assertEqual(result["points"], 0.0)
         self.assertEqual(result["amount"], 0.0)
+
+
+class TestVarianceDetector(unittest.TestCase):
+    def test_math_error_hand_calculated(self):
+        # Hand calc: line items sum to 412500 + 210000 = 622500, but the bill
+        # states total_due = 630700 -> a 8200 discrepancy (e.g. FAC omitted
+        # from the printed line items but folded into the total).
+        items = normalize_line_items({"Energy Charge": "Rs. 412500", "Demand Charge": "Rs. 210000"})
+        recalc_md = calculate_md_penalty(480, 500, demand_charge_rate=450, penalty_multiplier=1.75)
+        recalc_pf = calculate_pf_adjustment(0.97, 0.95, 0.90, 100000, 0.005, 0.01)
+        variances = detect_variances(items, billed_total_due=630700, recalculated_md=recalc_md, recalculated_pf=recalc_pf)
+        math_errors = [v for v in variances if v["type"] == "math-error"]
+        self.assertEqual(len(math_errors), 1)
+        self.assertEqual(math_errors[0]["recalculated_amount"], 622500.0)
+        self.assertEqual(math_errors[0]["billed_amount"], 630700)
+
+    def test_no_math_error_when_totals_match(self):
+        items = normalize_line_items({"Energy Charge": "Rs. 100000", "Demand Charge": "Rs. 50000"})
+        recalc_md = calculate_md_penalty(480, 500, demand_charge_rate=450, penalty_multiplier=1.75)
+        recalc_pf = calculate_pf_adjustment(0.97, 0.95, 0.90, 100000, 0.005, 0.01)
+        variances = detect_variances(items, billed_total_due=150000, recalculated_md=recalc_md, recalculated_pf=recalc_pf)
+        self.assertEqual([v for v in variances if v["type"] == "math-error"], [])
+
+    def test_md_penalty_unbilled_hand_calculated(self):
+        # Recorded MD (550) exceeds Contract Demand (500) by 50 kVA -
+        # hand calc: 50 * 450 * 1.75 = 39375 penalty is owed, but the bill's
+        # line items contain no MD Penalty charge at all (billed = 0).
+        items = normalize_line_items({"Energy Charge": "Rs. 500000", "Demand Charge": "Rs. 250000"})
+        recalc_md = calculate_md_penalty(550, 500, demand_charge_rate=450, penalty_multiplier=1.75)
+        recalc_pf = calculate_pf_adjustment(0.97, 0.95, 0.90, 100000, 0.005, 0.01)
+        variances = detect_variances(items, billed_total_due=750000, recalculated_md=recalc_md, recalculated_pf=recalc_pf)
+        md_findings = [v for v in variances if v["type"] == "md-penalty"]
+        self.assertEqual(len(md_findings), 1)
+        self.assertEqual(md_findings[0]["billed_amount"], 0.0)
+        self.assertEqual(md_findings[0]["recalculated_amount"], 39375.0)
+
+    def test_md_penalty_matches_no_finding(self):
+        items = normalize_line_items({"Energy Charge": "Rs. 500000", "MD Penalty": "Rs. 39375"})
+        recalc_md = calculate_md_penalty(550, 500, demand_charge_rate=450, penalty_multiplier=1.75)
+        recalc_pf = calculate_pf_adjustment(0.97, 0.95, 0.90, 100000, 0.005, 0.01)
+        variances = detect_variances(items, billed_total_due=539375, recalculated_md=recalc_md, recalculated_pf=recalc_pf)
+        self.assertEqual([v for v in variances if v["type"] == "md-penalty"], [])
+
+    def test_pf_penalty_missing_surcharge_hand_calculated(self):
+        # PF 0.85 is below the 0.90 surcharge threshold - hand calc:
+        # (0.90 - 0.85) * 100 = 5 points * 0.01 * 100000 base = 5000 owed,
+        # but the bill has no PF Surcharge line item (billed net = 0).
+        items = normalize_line_items({"Energy Charge": "Rs. 100000"})
+        recalc_md = calculate_md_penalty(480, 500, demand_charge_rate=450, penalty_multiplier=1.75)
+        recalc_pf = calculate_pf_adjustment(0.85, 0.95, 0.90, 100000, 0.005, 0.01)
+        variances = detect_variances(items, billed_total_due=100000, recalculated_md=recalc_md, recalculated_pf=recalc_pf)
+        pf_findings = [v for v in variances if v["type"] == "pf-penalty"]
+        self.assertEqual(len(pf_findings), 1)
+        self.assertEqual(pf_findings[0]["billed_amount"], 0.0)
+        self.assertEqual(pf_findings[0]["recalculated_amount"], 5000.0)
+
+
+class TestDollarImpactScorer(unittest.TestCase):
+    def test_overcharge_positive_impact_hand_calculated(self):
+        # billed 39375, recalculated 0 -> consumer was overcharged by 39375.
+        variance = {"type": "md-penalty", "billed_amount": 39375.0, "recalculated_amount": 0.0, "detail": "x"}
+        result = score_finding(variance)
+        self.assertEqual(result["rupee_impact"], 39375.0)
+        self.assertEqual(result["confidence"], 1.0)
+
+    def test_undercharge_negative_impact_hand_calculated(self):
+        # billed 0, recalculated 39375 -> consumer was undercharged (owes
+        # more than they paid) - impact is negative by this module's
+        # convention (positive = overcharge/dispute-worthy).
+        variance = {"type": "md-penalty", "billed_amount": 0.0, "recalculated_amount": 39375.0, "detail": "x"}
+        result = score_finding(variance)
+        self.assertEqual(result["rupee_impact"], -39375.0)
+
+    def test_confidence_reduced_by_data_quality_flags(self):
+        # Hand calc: 1.0 - 2 * 0.15 = 0.70
+        variance = {"type": "math-error", "billed_amount": 630700, "recalculated_amount": 622500.0, "detail": "x"}
+        result = score_finding(variance, data_quality_flags=["flag1", "flag2"])
+        self.assertEqual(result["confidence"], 0.70)
+
+    def test_confidence_floor(self):
+        variance = {"type": "math-error", "billed_amount": 1, "recalculated_amount": 0, "detail": "x"}
+        result = score_finding(variance, data_quality_flags=["a", "b", "c", "d", "e", "f", "g"])
+        self.assertEqual(result["confidence"], 0.1)
+
+    def test_score_findings_batch(self):
+        variances = [
+            {"type": "md-penalty", "billed_amount": 39375.0, "recalculated_amount": 0.0, "detail": "x"},
+            {"type": "math-error", "billed_amount": 630700, "recalculated_amount": 622500.0, "detail": "y"},
+        ]
+        scored = score_findings(variances)
+        self.assertEqual(len(scored), 2)
+        self.assertEqual(scored[0]["rupee_impact"], 39375.0)
+        self.assertEqual(scored[1]["rupee_impact"], 8200.0)
 
 
 if __name__ == "__main__":
