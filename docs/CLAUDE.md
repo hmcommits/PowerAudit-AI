@@ -212,29 +212,41 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 
 ## Backlog / known limitations (found during build, not yet actioned)
 
-> ⚠️ **STANDING RISK — read before touching any MD/PF formula or constant.**
-> The deterministic recalculation math exists in **two places** that must
-> be kept manually in sync, with no shared source and no automated check
-> that they agree:
-> - Python: `calculators/bill_line_parser.py`, `tariff_penalty_calculator.py`,
->   `variance_detector.py`, `dollar_impact_scorer.py`
-> - TypeScript: `apps/poweraudit-ai-ui/src/lib/calculators.ts`,
->   `stubTariff.ts`
+> ⚠️ **STANDING RISK — read before touching any MD/PF formula, constant, or
+> the Claim.status state machine.**
+> Deterministic logic that MUST stay LLM-free exists in **two places** for
+> two separate features, each pair kept manually in sync with no shared
+> source and no automated check that they agree:
+> - Recalculation math (Feature 2) —
+>   Python: `calculators/bill_line_parser.py`, `tariff_penalty_calculator.py`,
+>   `variance_detector.py`, `dollar_impact_scorer.py`;
+>   TypeScript: `apps/poweraudit-ai-ui/src/lib/calculators.ts`, `stubTariff.ts`
+> - Claim approval state machine (Feature 4) —
+>   Python: `calculators/claim_workflow.py`;
+>   TypeScript: `apps/poweraudit-ai-ui/src/lib/claimWorkflow.ts`
 >
 > This split exists because no RocketRide pipeline node runs arbitrary
 > deterministic Python on demand (`tool_python`'s direct-invoke path
 > doesn't work - see below) and the browser can't execute the Python
-> scripts directly, so Feature 5's interactive upload needed its own
-> client-side port. **This is not a one-time note - it is a standing
-> maintenance obligation.** Any future change to a formula, a threshold, a
-> rounding rule, or `STUB_TARIFF_PARAMS`/`STUB_CITATION` MUST be applied to
-> **both** implementations and then re-verified identical (see
-> `apps/poweraudit-ai-ui/scripts/test-calculator-parity.mts`, which diffs
-> every Finding the TypeScript calculators would produce against the
+> scripts directly, so any interactive (browser-triggered) feature needing
+> this logic needs its own client-side port. Feature 5's interactive upload
+> needed the calculator port; Feature 5's interactive claim approval hit
+> the identical constraint and got the identical fix - ported, not treated
+> as a new discovery, the moment it came up. **This is not a one-time
+> note - it is a standing maintenance obligation, and it applies to any
+> future port too.** Any future change to a formula, a threshold, a
+> rounding rule, `STUB_TARIFF_PARAMS`/`STUB_CITATION`, a valid state
+> transition, or the approval guard MUST be applied to **both**
+> implementations of whichever pair it touches and then re-verified
+> identical - see `apps/poweraudit-ai-ui/scripts/test-calculator-parity.mts`
+> (diffs every Finding the TypeScript calculators would produce against the
 > Python-computed Finding already in RocketRide SQL, for every real bill on
-> file) before being considered done. A change applied to only one side
-> will silently diverge - there is no compiler, linter, or test that
-> catches this on its own; running the parity script is the check.
+> file) and `apps/poweraudit-ai-ui/scripts/test-claim-workflow-parity.mts`
+> (runs `calculators/test_calculators.py`'s `TestClaimWorkflow` cases
+> against the TypeScript port and confirms identical accept/reject
+> behavior) - before being considered done. A change applied to only one
+> side will silently diverge - there is no compiler, linter, or test that
+> catches this on its own; running the relevant parity script is the check.
 
 - **SDK's `onTrace` redacts credential-shaped fields structurally, not by
   value.** While verifying the Gemini key never leaves the client resolved
