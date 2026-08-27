@@ -1,0 +1,90 @@
+BESCOM (BANGALORE ELECTRICITY SUPPLY COMPANY)
+TARIFF ORDER 2024 — KERC (Karnataka Electricity Regulatory Commission)
+Clause 11(a) — Maximum Demand Charges and Penal Provisions
+
+Applicability: All High Tension (HT) consumers under HT-2(a), HT-2(b), HT-2(c), HT-3, and EHT categories.
+
+Contract Demand Compliance:
+  Consumers must operate within their sanctioned Contract Demand (CD) at all times.
+  If the Maximum Demand (MD) recorded in any 15-minute interval in a billing month exceeds the sanctioned Contract Demand:
+
+Penalty Formula:
+  If Recorded MD > Contract Demand x 1.10:
+    Excess Demand (kVA) = Recorded MD - Contract Demand
+    Penal Charge = Excess Demand (kVA) x Applicable Demand Rate x 2.0
+
+  The applicable demand rate is Rs. 230/kVA/month for HT-2(a) (industrial) category consumers.
+
+  BESCOM strictly enforces the 2x (double) penal rate — the highest multiplier among the three DISCOMs.
+  Source: Whitepaper confirms: "If Maximum Demand exceeds sanctioned load, penal charges apply at 2x the normal rate."
+
+  Practical Implication for Large Factories:
+  A factory with CD = 600 kVA and MD spike to 700 kVA in one 15-minute window:
+    Excess = 100 kVA; Penalty = 100 x 230 x 2 = Rs. 46,000 for that billing month.
+  Install IoT-based energy management systems to sequence heavy motor starts and prevent MD spikes.
+
+Minimum Demand Provision:
+  If MD < 50% of CD in any month, the consumer is billed for 50% of CD as Minimum Demand.
+  Minimum Demand Charge = CD x 0.50 x Rs. 230 per kVA
+
+Off-Season Tariff:
+  BESCOM allows industrial consumers to avail of an off-season tariff for up to six (6) months per year during overhauling/maintenance periods. This significantly reduces minimum billing requirements during low-production periods.
+
+Reference: BESCOM Tariff Order 2024, KERC Tariff Order, Clause 11(a) — Maximum Demand Charges.
+
+---
+
+BESCOM TARIFF ORDER 2024
+Clause 12 — Power Factor Incentive and Penalty
+
+All HT consumers must maintain an average Power Factor of 0.90 or above throughout the billing month.
+
+Power Factor Penalty:
+  If average PF < 0.90:
+  Penalty = Energy Charges x ((0.90 - Recorded PF) / 0.90) x 1.00
+
+Power Factor Incentive:
+  If average PF >= 0.95:
+  Incentive = Energy Charges x ((Recorded PF - 0.95) / 0.95) x 0.50
+  The incentive amount is credited to the consumer's next bill.
+
+Recommendation: Install Automatic Power Factor Correction (APFC) panels to maintain PF >= 0.95 consistently. This avoids penalties and generates DISCOM credits, effectively reducing the energy bill.
+
+Reference: BESCOM Tariff Order 2024, Clause 12 — Power Factor Incentive/Penalty.
+
+---
+
+BESCOM TARIFF ORDER 2024
+Time-of-Day (ToD) Mandatory Provisions
+
+ToD tariff is MANDATORY for the following consumer categories:
+  - HT-2(a): Industrial consumers with Contract Demand >= 500 kVA
+  - HT-2(b): Industrial consumers with Contract Demand >= 500 kVA
+  - HT-2(c): Industrial consumers with Contract Demand >= 500 kVA
+
+  ToD tariff remains OPTIONAL for consumers with Contract Demand below 500 kVA.
+
+Off-Peak Hours: Typically 10 PM to 6 AM (22:00 to 06:00)
+Peak Hours: 6 AM to 10 PM
+
+Strategic Recommendation: Shift energy-intensive operations (crushing, heavy heating, batch processing) to off-peak hours (10 PM - 6 AM) to leverage ToD discounts. This is most impactful for manufacturers.
+
+Reference: BESCOM Tariff Order 2024, ToD Schedule.
+
+---
+
+BESCOM TARIFF ORDER 2024
+LT-6(a) Category — Electric Vehicle (EV) Charging Tariff
+
+EV Charging Tariff: Rs. 5.50 to Rs. 6.50 per unit (single-part tariff, LT-6a category)
+  Exact rate within this band depends on connection type and CPO agreement.
+
+  NO DEMAND CHARGES: EV charging connections under LT-6(a) are completely exempt from fixed demand charges. This is consistent with the national policy of promoting EV infrastructure by reducing fixed OPEX for Charge Point Operators (CPOs).
+
+  BESCOM EV Land Aggregator Portal: BESCOM operates a dedicated portal under the PM E-DRIVE initiative to connect private landowners with CPOs seeking to deploy public charging infrastructure.
+
+  Best Target Segment: Tech parks, public highway corridors, and urban parking facilities in Bengaluru.
+
+  Critical Compliance Note: Never charge EVs on a standard HT-2 commercial or industrial meter. EV loads can cause sudden Maximum Demand spikes, triggering the 2x MD penal rate (Clause 11(a)). Always apply for a dedicated LT-6(a) EV meter.
+
+Reference: BESCOM Tariff Order 2024, LT-6(a) — EV Charging Category.

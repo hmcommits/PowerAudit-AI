@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerAudit AI — Electricity Bill Audit Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0a0e1a;
+      --bg2:       #111827;
+      --bg3:       #1a2235;
+      --border:    rgba(255,255,255,0.08);
+      --accent:    #6366f1;
+      --accent2:   #8b5cf6;
+      --green:     #10b981;
+      --red:       #ef4444;
+      --yellow:    #f59e0b;
+      --blue:      #3b82f6;
+      --text:      #f1f5f9;
+      --muted:     #94a3b8;
+      --card-glow: rgba(99,102,241,0.15);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+      position: sticky; top: 0; z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+    .logo { display: flex; align-items: center; gap: 0.75rem; }
+    .logo-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+    }
+    .logo-text { font-size: 1.1rem; font-weight: 700; }
+    .logo-sub  { font-size: 0.7rem; color: var(--muted); font-weight: 400; }
+    .header-badge {
+      background: rgba(16,185,129,0.15);
+      border: 1px solid rgba(16,185,129,0.3);
+      color: var(--green);
+      padding: 4px 12px; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 600;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; } 50% { opacity:.6; }
+    }
+
+    /* ── MAIN LAYOUT ── */
+    .main { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 64px); }
+
+    /* ── SIDEBAR ── */
+    nav {
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 1rem;
+      display: flex; flex-direction: column; gap: 0.25rem;
+    }
+    .nav-section { font-size: 0.65rem; font-weight: 700; color: var(--muted);
+                   letter-spacing: 0.12em; text-transform: uppercase;
+                   padding: 1rem 0.5rem 0.5rem; }
+    .nav-btn {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.6rem 0.75rem; border-radius: 8px;
+      cursor: pointer; border: none; background: transparent;
+      color: var(--muted); font-size: 0.875rem; font-weight: 500;
+      width: 100%; text-align: left; transition: all 0.15s;
+    }
+    .nav-btn:hover  { background: var(--bg3); color: var(--text); }
+    .nav-btn.active { background: rgba(99,102,241,0.2); color: var(--accent);
+                      border: 1px solid rgba(99,102,241,0.3); }
+    .nav-icon { font-size: 1rem; width: 20px; text-align: center; }
+
+    /* ── CONTENT ── */
+    .content { padding: 2rem; overflow-y: auto; }
+
+    /* ── STAT CARDS ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem; margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      position: relative; overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px var(--card-glow);
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    }
+    .stat-card.indigo::before { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    .stat-card.green::before  { background: var(--green); }
+    .stat-card.red::before    { background: var(--red); }
+    .stat-card.yellow::before { background: var(--yellow); }
+    .stat-card.blue::before   { background: var(--blue); }
+    .stat-label { font-size: 0.75rem; color: var(--muted); font-weight: 500; margin-bottom: 0.5rem; }
+    .stat-value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
+    .stat-sub   { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+
+    /* ── SECTION HEADER ── */
+    .section-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .section-title { font-size: 1rem; font-weight: 700; }
+
+    /* ── BTN ── */
+    .btn {
+      padding: 0.5rem 1.25rem; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 0.875rem; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-outline:hover { background: var(--bg3); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+    /* ── TABLE ── */
+    .table-wrap {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th {
+      background: var(--bg3);
+      padding: 0.75rem 1rem;
+      text-align: left; font-size: 0.7rem; font-weight: 700;
+      color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* ── BADGE ── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 10px; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+    }
+    .badge-red    { background: rgba(239,68,68,0.15);  color: #ef4444; }
+    .badge-green  { background: rgba(16,185,129,0.15); color: #10b981; }
+    .badge-yellow { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .badge-blue   { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .badge-gray   { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    .badge-purple { background: rgba(139,92,246,0.15); color: #8b5cf6; }
+
+    /* ── LOG CONSOLE ── */
+    .log-box {
+      background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+      padding: 1rem; font-family: 'Courier New', monospace; font-size: 0.8rem;
+      max-height: 320px; overflow-y: auto; color: #e2e8f0;
+    }
+    .log-line { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .log-line.ok   { color: #10b981; }
+    .log-line.err  { color: #ef4444; }
+    .log-line.info { color: #94a3b8; }
+    .log-line.warn { color: #f59e0b; }
+
+    /* ── LOADING SPINNER ── */
+    .spinner {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      animation: spin 0.6s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── MONEY HIGHLIGHT ── */
+    .money-big { font-size: 1.1rem; font-weight: 700; color: var(--red); }
+    .money-pos { color: var(--green); }
+
+    /* ── PANELS ── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── PIPELINE VIZ ── */
+    .pipeline-steps {
+      display: flex; align-items: center; gap: 0;
+      overflow-x: auto; padding: 1rem 0;
+      margin-bottom: 1.5rem;
+    }
+    .pipe-step {
+      display: flex; flex-direction: column; align-items: center;
+      min-width: 110px; gap: 0.5rem;
+    }
+    .pipe-node {
+      width: 52px; height: 52px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      transition: all 0.3s;
+    }
+    .pipe-node.done    { background: rgba(16,185,129,0.2); border-color: var(--green); }
+    .pipe-node.running { background: rgba(99,102,241,0.2); border-color: var(--accent);
+                         animation: glowPulse 1s infinite; }
+    .pipe-node.error   { background: rgba(239,68,68,0.2); border-color: var(--red); }
+    @keyframes glowPulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
+      50%      { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
+    }
+    .pipe-label { font-size: 0.68rem; color: var(--muted); text-align: center; max-width: 100px; }
+    .pipe-arrow { color: var(--muted); font-size: 1rem; padding: 0 0.25rem; }
+
+    /* ── CITATION BOX ── */
+    .citation-box {
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.25);
+      border-radius: 8px; padding: 0.75rem 1rem;
+      font-size: 0.8rem; color: #a5b4fc;
+      margin-top: 0.5rem;
+    }
+
+    .empty-state {
+      text-align: center; padding: 3rem; color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <div class="logo-text">PowerAudit AI</div>
+      <div class="logo-sub">Electricity Bill Audit Platform</div>
+    </div>
+  </div>
+  <div class="header-badge">● Local Mode</div>
+</header>
+
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <nav>
+    <div class="nav-section">Overview</div>
+    <button class="nav-btn active" onclick="showPanel('dashboard')" id="nav-dashboard">
+      <span class="nav-icon">📊</span> Dashboard
+    </button>
+
+    <div class="nav-section">Pipeline</div>
+    <button class="nav-btn" onclick="showPanel('run')" id="nav-run">
+      <span class="nav-icon">▶</span> Run Batch
+    </button>
+    <button class="nav-btn" onclick="showPanel('ingest')" id="nav-ingest">
+      <span class="nav-icon">📥</span> Ingest Bill
+    </button>
+
+    <div class="nav-section">Data</div>
+    <button class="nav-btn" onclick="showPanel('bills')" id="nav-bills">
+      <span class="nav-icon">🧾</span> Bills
+    </button>
+    <button class="nav-btn" onclick="showPanel('findings')" id="nav-findings">
+      <span class="nav-icon">🔍</span> Findings
+    </button>
+  </nav>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+    <!-- ── DASHBOARD ── -->
+    <div class="panel active" id="panel-dashboard">
+      <div class="section-hdr" style="margin-bottom:1.5rem">
+        <div>
+          <h1 style="font-size:1.4rem;font-weight:800">Audit Dashboard</h1>
+          <p style="color:var(--muted);font-size:0.85rem;margin-top:4px">
+            Real-time billing anomaly detection across MSEDCL · TSSPDCL · BESCOM
+          </p>
+        </div>
+        <button class="btn btn-outline" onclick="loadStats()">↻ Refresh</button>
+      </div>
+
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card indigo">
+          <div class="stat-label">Total Bills Processed</div>
+          <div class="stat-value" id="s-bills">—</div>
+          <div class="stat-sub">Across all sites</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label">Total Rupee Overcharged</div>
+          <div class="stat-value" id="s-impact" style="color:var(--red)">—</div>
+          <div class="stat-sub">Identified overcharges</div>
+        </div>
+        <div class="stat-card yellow">
+          <div class="stat-label">Needs Review</div>
+          <div class="stat-value" id="s-review" style="color:var(--yellow)">—</div>
+          <div class="stat-sub">Low-confidence extractions</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label">Findings Generated</div>
+          <div class="stat-value" id="s-findings" style="color:var(--green)">—</div>
+          <div class="stat-sub">MD + PF variances</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="stat-label">Avg Confidence</div>
+          <div class="stat-value" id="s-conf" style="color:var(--blue)">—</div>
+          <div class="stat-sub">Scoring accuracy</div>
+        </div>
+      </div>
+
+      <!-- Overcharged findings table -->
+      <div class="section-hdr">
+        <div class="section-title">🔴 Overcharged Findings</div>
+        <button class="btn btn-outline" onclick="loadOvercharged()">Load</button>
+      </div>
+      <div class="table-wrap" id="overcharged-table">
+        <div class="empty-state">
+          <div class="empty-icon">⚡</div>
+          <div>Run a batch first to see findings</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RUN BATCH ── -->
+    <div class="panel" id="panel-run">
+      <h1 style="font-size:1.4rem;font-weight:800;margin-bottom:0.5rem">Run Full Pipeline</h1>
+      <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1.5rem">
+        Processes all 3 fixture bills through both pipelines end-to-end
+      </p>
+
+      <!-- Pipeline visualiser -->
+      <div class="pipeline-steps" id="pipe-viz">
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-ingest">📥</div>
+          <div class="pipe-label">Bill Ingestion</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-parse">🔤</div>
+          <div class="pipe-label">Line Parser</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-calc">🧮</div>
+          <div class="pipe-label">Penalty Calculator</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-var">📐</div>
+          <div class="pipe-label">Variance Detector</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-score">💰</div>
+          <div class="pipe-label">Impact Scorer</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-cite">📎</div>
+          <div class="pipe-label">Citation Attacher</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-node" id="pn-sql">🗄️</div>
+          <div class="pipe-label">Write to DB</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-batch" onclick="runBatch()">
+        <span>▶  Run All 3 Fixtures</span>
+      </button>
+      &nbsp;
+      <button class="btn btn-outline" onclick="clearLog()">Clear Log</button>
+
+      <div style="margin-top:1.25rem">
+        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem;font-weight:600">PIPELINE LOG</div>
+        <div class="log-box" id="run-log">
+          <div class="log-line info">Ready — click Run to start</div>
+        </div>
+      </div>
+
+      <div id="batch-results" style="margin-top:1.5rem"></div>
+    </div>
+
+    <!-- ── INGEST BILL ── -->
+    <div class="panel" id="panel-ingest">
+      <h1 style="font-size:1.4rem;font-weight:800;margin-bottom:0.5rem">Ingest Single Bill</h1>
+      <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1.5rem">
+        Paste bill JSON or pick a preset fixture
+      </p>
+
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem">
+        <button class="btn btn-outline" onclick="loadPreset(0)">📋 MSEDCL Fixture</button>
+        <button class="btn btn-outline" onclick="loadPreset(1)">📋 TSSPDCL Fixture</button>
+        <button class="btn btn-outline" onclick="loadPreset(2)">📋 BESCOM Fixture</button>
+      </div>
+
+      <textarea id="bill-json" rows="16" style="
+        width:100%; background:var(--bg2); border:1px solid var(--border);
+        color:var(--text); border-radius:8px; padding:1rem;
+        font-family:'Courier New',monospace; font-size:0.8rem;
+        resize:vertical; outline:none;
+      " placeholder='Paste bill JSON here or click a preset above...'></textarea>
+
+      <div style="margin-top:1rem;display:flex;gap:0.75rem">
+        <button class="btn btn-primary" id="btn-ingest" onclick="ingestBill()">
+          ▶  Ingest & Analyse
+        </button>
+      </div>
+
+      <div id="ingest-result" style="margin-top:1.5rem"></div>
+    </div>
+
+    <!-- ── BILLS ── -->
+    <div class="panel" id="panel-bills">
+      <div class="section-hdr">
+        <div>
+          <h1 style="font-size:1.4rem;font-weight:800">Bills Table</h1>
+          <p style="color:var(--muted);font-size:0.85rem;margin-top:4px">All ingested bills</p>
+        </div>
+        <button class="btn btn-outline" onclick="loadBills()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap" id="bills-table">
+        <div class="empty-state"><div class="empty-icon">🧾</div><div>No bills yet</div></div>
+      </div>
+    </div>
+
+    <!-- ── FINDINGS ── -->
+    <div class="panel" id="panel-findings">
+      <div class="section-hdr">
+        <div>
+          <h1 style="font-size:1.4rem;font-weight:800">Findings Table</h1>
+          <p style="color:var(--muted);font-size:0.85rem;margin-top:4px">MD & PF penalty variances with citations</p>
+        </div>
+        <button class="btn btn-outline" onclick="loadFindings()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap" id="findings-table">
+        <div class="empty-state"><div class="empty-icon">🔍</div><div>No findings yet</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const FIXTURES = null; // loaded on demand from API
+
+// ── NAV ──────────────────────────────────────────────────────
+function showPanel(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  document.getElementById('nav-' + id).classList.add('active');
+  if (id === 'dashboard') loadStats();
+  if (id === 'bills')     loadBills();
+  if (id === 'findings')  loadFindings();
+}
+
+// ── STATS ─────────────────────────────────────────────────────
+async function loadStats() {
+  const r = await fetch('/api/stats');
+  const d = await r.json();
+  document.getElementById('s-bills').textContent    = d.total_bills;
+  document.getElementById('s-review').textContent   = d.bills_needs_review;
+  document.getElementById('s-findings').textContent = d.total_findings;
+  document.getElementById('s-impact').textContent   = 'Rs.' + (d.total_rupee_impact||0).toLocaleString('en-IN', {maximumFractionDigits:0});
+  document.getElementById('s-conf').textContent     = (d.avg_confidence||0) + '%';
+}
+
+// ── OVERCHARGED FINDINGS ───────────────────────────────────────
+async function loadOvercharged() {
+  const r = await fetch('/api/findings/overcharged');
+  const rows = await r.json();
+  const el = document.getElementById('overcharged-table');
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div>No overcharges found yet — run the batch first</div></div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Finding ID</th><th>Bill ID</th><th>Type</th>
+      <th>Billed</th><th>Should Be</th><th>Overcharge</th>
+      <th>Citation</th><th>Source</th>
+    </tr></thead>
+    <tbody>${rows.map(f => `<tr>
+      <td style="font-family:monospace;font-size:0.75rem">${f.finding_id}</td>
+      <td><span class="badge badge-blue">${f.bill_id}</span></td>
+      <td><span class="badge badge-purple">${f.finding_type}</span></td>
+      <td>Rs.${(f.billed_amount||0).toLocaleString('en-IN')}</td>
+      <td>Rs.${(f.recalculated_amount||0).toLocaleString('en-IN')}</td>
+      <td class="money-big">Rs.${(f.rupee_impact||0).toLocaleString('en-IN')}</td>
+      <td style="font-size:0.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${f.citation_clause_ref||''}">${f.citation_clause_ref||'—'}</td>
+      <td><span class="badge badge-gray">${f.citation_source||'—'}</span></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ── BATCH RUN ─────────────────────────────────────────────────
+function log(msg, cls='info') {
+  const box = document.getElementById('run-log');
+  const d = document.createElement('div');
+  d.className = 'log-line ' + cls;
+  d.textContent = '[' + new Date().toLocaleTimeString() + ']  ' + msg;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('run-log').innerHTML = '<div class="log-line info">Log cleared</div>';
+}
+
+const PIPE_NODES = ['ingest','parse','calc','var','score','cite','sql'];
+function resetPipe() {
+  PIPE_NODES.forEach(n => {
+    const el = document.getElementById('pn-' + n);
+    if (el) { el.classList.remove('done','running','error'); }
+  });
+}
+function setPipeState(node, state) {
+  const el = document.getElementById('pn-' + node);
+  if (el) {
+    el.classList.remove('done','running','error');
+    if (state) el.classList.add(state);
+  }
+}
+
+async function runBatch() {
+  const btn = document.getElementById('btn-batch');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>  Running...';
+  resetPipe();
+  document.getElementById('batch-results').innerHTML = '';
+
+  log('Starting batch run — 3 fixtures (MSEDCL, TSSPDCL, BESCOM)...', 'info');
+
+  // Animate pipeline stages
+  const stages = [
+    ['ingest',  'Bill ingestion — OCR + extraction + schema validate'],
+    ['parse',   'bill_line_parser — normalising fields...'],
+    ['calc',    'tariff_penalty_calculator — deterministic MD/PF recalc...'],
+    ['var',     'variance_detector — comparing billed vs recalculated...'],
+    ['score',   'dollar_impact_scorer — computing rupee impact + confidence...'],
+    ['cite',    'citation_attacher — attaching tariff clause refs...'],
+    ['sql',     'Writing bills + findings to database...'],
+  ];
+
+  let stageIdx = 0;
+  const animInterval = setInterval(() => {
+    if (stageIdx > 0) setPipeState(stages[stageIdx-1][0], 'done');
+    if (stageIdx < stages.length) {
+      setPipeState(stages[stageIdx][0], 'running');
+      log(stages[stageIdx][1]);
+      stageIdx++;
+    } else {
+      clearInterval(animInterval);
+    }
+  }, 400);
+
+  try {
+    const r = await fetch('/api/run-batch', { method: 'POST' });
+    const d = await r.json();
+
+    // Wait for animation to finish
+    await new Promise(res => setTimeout(res, stages.length * 400 + 200));
+    clearInterval(animInterval);
+    PIPE_NODES.forEach(n => setPipeState(n, 'done'));
+
+    if (d.error) {
+      log('ERROR: ' + d.error, 'err');
+    } else {
+      let totalImpact = 0;
+      d.results.forEach(res => {
+        if (res.error) {
+          log(`[${res.bill_id}] ERROR: ${res.error}`, 'err');
+        } else {
+          const p2 = res.pipeline_2 || {};
+          const impact = p2.total_rupee_impact || 0;
+          totalImpact += impact;
+          const mat = p2.materiality_flag ? '⚠ MATERIAL' : 'below threshold';
+          log(`[${res.bill_id}]  impact=Rs.${impact.toLocaleString('en-IN')}  conf=${p2.confidence_score}%  ${mat}`, impact > 0 ? 'warn' : 'ok');
+        }
+      });
+      log(`Batch complete. Total overcharges identified: Rs.${totalImpact.toLocaleString('en-IN')}`, 'ok');
+      renderBatchResults(d.results);
+      loadStats();
+    }
+  } catch (e) {
+    clearInterval(animInterval);
+    PIPE_NODES.forEach(n => setPipeState(n, 'error'));
+    log('Network error: ' + e.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<span>▶  Run All 3 Fixtures</span>';
+}
+
+function renderBatchResults(results) {
+  const el = document.getElementById('batch-results');
+  el.innerHTML = `
+    <div class="section-hdr" style="margin-top:1rem"><div class="section-title">Results</div></div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>Bill ID</th><th>DISCOM</th><th>MD Status</th><th>PF Status</th>
+        <th>Rupee Impact</th><th>Confidence</th><th>Material</th>
+      </tr></thead>
+      <tbody>${results.map(res => {
+        if (res.error) return `<tr><td colspan="7" style="color:var(--red)">${res.bill_id}: ${res.error}</td></tr>`;
+        const p2 = res.pipeline_2 || {};
+        const bd = p2.breakdown || [];
+        const md = bd.find(b => b.finding_type === 'MD_PENALTY');
+        const pf = bd.find(b => b.finding_type === 'PF_PENALTY');
+        return `<tr>
+          <td><span class="badge badge-blue">${res.bill_id}</span></td>
+          <td>${res.pipeline_2?.findings?.[0]?.citation_discom || '—'}</td>
+          <td>${flagBadge(md?.variance_flag)}</td>
+          <td>${flagBadge(pf?.variance_flag)}</td>
+          <td class="${(p2.total_rupee_impact||0)>0?'money-big':'money-pos'}">Rs.${(p2.total_rupee_impact||0).toLocaleString('en-IN')}</td>
+          <td>${p2.confidence_score||0}%</td>
+          <td>${p2.materiality_flag ? '<span class="badge badge-red">⚠ YES</span>' : '<span class="badge badge-gray">NO</span>'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+}
+
+function flagBadge(flag) {
+  const map = {
+    'OVERCHARGED':  'badge-red',
+    'UNDERCHARGED': 'badge-yellow',
+    'MATCH':        'badge-green',
+    'INCONCLUSIVE': 'badge-gray',
+  };
+  return flag ? `<span class="badge ${map[flag]||'badge-gray'}">${flag}</span>` : '—';
+}
+
+// ── INGEST SINGLE BILL ─────────────────────────────────────────
+async function loadPreset(idx) {
+  const r = await fetch('/api/bills'); // use fixtures directly
+  const fixtures = [
+    {bill_id:'B1001',site_id:'S101',month:'Jan',discom_id:'MSEDCL',meter_number:'MH-GGN-001',tariff_category:'HT-I',contract_demand_kva:500,recorded_max_demand_kva:580,power_factor:0.86,units_consumed_kwh:800,energy_charges:6400,md_penalty_billed:45000,pf_penalty_billed:1200,fixed_charges:3000,taxes_and_duties:500,total_due:56100,amount_paid:6400,outstanding_amount:49700,payment_status:'Overdue',provider_name:'Tata Power'},
+    {bill_id:'B2001',site_id:'S106',month:'Jan',discom_id:'TSSPDCL',meter_number:'TS-HYD-006',tariff_category:'HT-II',contract_demand_kva:400,recorded_max_demand_kva:410,power_factor:0.96,units_consumed_kwh:850,energy_charges:6800,md_penalty_billed:0,pf_penalty_billed:0,fixed_charges:2500,taxes_and_duties:420,total_due:9720,amount_paid:0,outstanding_amount:9720,payment_status:'Overdue',provider_name:'NTPC Utility'},
+    {bill_id:'B3001',site_id:'S105',month:'Feb',discom_id:'BESCOM',meter_number:'KA-BLR-005',tariff_category:'HT-2(a)',contract_demand_kva:600,recorded_max_demand_kva:290,power_factor:0.90,units_consumed_kwh:700,energy_charges:5600,md_penalty_billed:0,pf_penalty_billed:0,fixed_charges:2800,taxes_and_duties:380,total_due:8780,amount_paid:5600,outstanding_amount:3180,payment_status:'Pending',provider_name:'CESC Limited'},
+  ];
+  document.getElementById('bill-json').value = JSON.stringify(fixtures[idx], null, 2);
+}
+
+async function ingestBill() {
+  const btn = document.getElementById('btn-ingest');
+  const resultEl = document.getElementById('ingest-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>  Analysing...';
+  resultEl.innerHTML = '';
+
+  try {
+    const body = JSON.parse(document.getElementById('bill-json').value);
+    const r = await fetch('/api/ingest-bill', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+
+    if (d.error) {
+      resultEl.innerHTML = `<div style="color:var(--red);padding:1rem;background:rgba(239,68,68,0.1);border-radius:8px">Error: ${d.error}</div>`;
+    } else {
+      const p2 = d.penalty_detection || {};
+      const impact = p2.total_rupee_impact || 0;
+      resultEl.innerHTML = `
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:1.25rem">
+          <div style="font-weight:700;margin-bottom:1rem">✅ Bill ${d.bill_id} processed</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+            <div>
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">RUPEE IMPACT</div>
+              <div class="${impact>0?'money-big':'money-pos'}" style="font-size:1.5rem">Rs.${impact.toLocaleString('en-IN')}</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">CONFIDENCE</div>
+              <div style="font-size:1.5rem;font-weight:700">${p2.confidence_score||0}%</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">NEEDS REVIEW</div>
+              <div>${d.needs_review ? '<span class="badge badge-yellow">⚠ YES</span>' : '<span class="badge badge-green">✓ NO</span>'}</div>
+            </div>
+            <div>
+              <div style="font-size:0.7rem;color:var(--muted);margin-bottom:4px">MATERIAL</div>
+              <div>${p2.materiality_flag ? '<span class="badge badge-red">⚠ YES</span>' : '<span class="badge badge-gray">NO</span>'}</div>
+            </div>
+          </div>
+          ${(p2.findings||[]).filter(f=>f.variance_flag==='OVERCHARGED').map(f=>`
+            <div class="citation-box" style="margin-top:1rem">
+              <strong>${f.finding_type}</strong>: ${f.variance_flag}<br>
+              Billed Rs.${(f.billed_amount||0).toLocaleString('en-IN')} → Recalculated Rs.${(f.recalculated_amount||0).toLocaleString('en-IN')} → <strong>Impact Rs.${(f.rupee_impact||0).toLocaleString('en-IN')}</strong><br>
+              <small>📎 ${f.citation_clause_ref||'No citation'}</small>
+            </div>`).join('')}
+        </div>`;
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<div style="color:var(--red);padding:1rem;background:rgba(239,68,68,0.1);border-radius:8px">JSON parse error: ${e.message}</div>`;
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '▶  Ingest & Analyse';
+}
+
+// ── BILLS TABLE ───────────────────────────────────────────────
+async function loadBills() {
+  const r = await fetch('/api/bills');
+  const rows = await r.json();
+  const el = document.getElementById('bills-table');
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><div>No bills yet — run a batch first</div></div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Bill ID</th><th>Site</th><th>Month</th><th>Provider</th>
+      <th>CD (kVA)</th><th>MD (kVA)</th><th>PF</th>
+      <th>Total Due</th><th>Review</th>
+    </tr></thead>
+    <tbody>${rows.map(b=>`<tr>
+      <td style="font-family:monospace;font-size:0.75rem">${b.bill_id}</td>
+      <td>${b.site_id}</td>
+      <td>${b.month}</td>
+      <td style="font-size:0.8rem">${b.provider_name||'—'}</td>
+      <td>${b.contract_demand_kva||'—'}</td>
+      <td>${b.recorded_max_demand_kva||'—'}</td>
+      <td>${b.power_factor||'—'}</td>
+      <td>Rs.${(b.total_due||0).toLocaleString('en-IN')}</td>
+      <td>${b.needs_review ? '<span class="badge badge-yellow">⚠ YES</span>' : '<span class="badge badge-green">✓ OK</span>'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ── FINDINGS TABLE ─────────────────────────────────────────────
+async function loadFindings() {
+  const r = await fetch('/api/findings');
+  const rows = await r.json();
+  const el = document.getElementById('findings-table');
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><div>No findings yet — run a batch first</div></div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Finding ID</th><th>Bill</th><th>Type</th><th>Flag</th>
+      <th>Billed</th><th>Recalculated</th><th>Impact</th>
+      <th>Confidence</th><th>Citation</th>
+    </tr></thead>
+    <tbody>${rows.map(f=>`<tr>
+      <td style="font-family:monospace;font-size:0.7rem">${f.finding_id}</td>
+      <td><span class="badge badge-blue">${f.bill_id}</span></td>
+      <td><span class="badge badge-purple">${f.finding_type}</span></td>
+      <td>${flagBadge(f.variance_flag)}</td>
+      <td>Rs.${(f.billed_amount||0).toLocaleString('en-IN')}</td>
+      <td>Rs.${(f.recalculated_amount||0).toLocaleString('en-IN')}</td>
+      <td class="${(f.rupee_impact||0)>0?'money-big':'money-pos'}">Rs.${(f.rupee_impact||0).toLocaleString('en-IN')}</td>
+      <td>${(f.confidence_score||0).toFixed(1)}%</td>
+      <td style="font-size:0.7rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${f.citation_clause_ref||''}">${f.citation_clause_ref||'—'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+loadStats();
+</script>
+
+</body>
+</html>

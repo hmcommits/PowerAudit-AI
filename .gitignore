@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Environment — NEVER commit real keys
+.env
+
+# Database
+poweraudit.db
+
+# Uploads (user files)
+uploads/
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db

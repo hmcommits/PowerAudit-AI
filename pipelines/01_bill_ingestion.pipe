@@ -1,0 +1,159 @@
+{
+  "id": "01_bill_ingestion",
+  "name": "PowerAudit — Smart Bill Reading & Multi-format Parsing",
+  "description": "Feature #1: Accepts any bill format (phone photo, scanned PDF, digital PDF). Runs Drag & Drop → Cleanup → OCR → Data Extractor → Schema Validate → SQL Write. Low-confidence extractions flagged for human review.",
+  "version": "2.0.0",
+  "nodes": [
+
+    {
+      "id": "drag_drop",
+      "type": "drag_and_drop",
+      "label": "Bill Drop Zone",
+      "config": {
+        "accepted_formats": ["image/jpeg", "image/png", "image/webp", "image/tiff", "application/pdf"],
+        "max_file_size_mb": 20,
+        "batch": true,
+        "description": "Accepts bulk drops of bill images and PDFs. Each file is routed independently through the rest of the pipeline.",
+        "ui_label": "Drop bills here — JPG, PNG, TIFF, or PDF",
+        "on_upload_webhook": "/api/upload-bill"
+      },
+      "outputs": ["cleanup"]
+    },
+
+    {
+      "id": "cleanup",
+      "type": "tool_python",
+      "label": "Image Cleanup & Deskew",
+      "config": {
+        "code_file": "nodes/bill_cleanup.py",
+        "description": "Preprocesses uploaded files before OCR: deskews rotated photos, denoises scanned pages, normalises brightness/contrast. For PDFs, extracts embedded text directly (no OCR needed). Outputs cleaned base64 image or raw text.",
+        "allowedModules": ["json", "sys", "base64", "io", "os"],
+        "input_lane": "drag_drop.file"
+      },
+      "outputs": ["ocr"]
+    },
+
+    {
+      "id": "ocr",
+      "type": "llm_google",
+      "label": "OCR — Raw Text Extraction",
+      "config": {
+        "model": "gemini-1.5-pro",
+        "system_prompt": "You are an OCR engine for Indian electricity bills. Input is a base64-encoded bill image or raw PDF text.\n\n1. If input is an image: extract ALL visible text character-by-character, preserving layout and line breaks. Do not interpret or summarise — just transcribe.\n2. If input is text (PDF extract): pass through unchanged.\n3. Note any quality issues (blur, skew, torn edges, faded ink).\n\nReturn JSON: { \"raw_text\": \"<all extracted text>\", \"quality_notes\": \"<issues or empty string>\", \"source_type\": \"image|pdf\" }",
+        "input_lane": "cleanup.output",
+        "temperature": 0,
+        "max_tokens": 4096
+      },
+      "outputs": ["data_extractor"]
+    },
+
+    {
+      "id": "data_extractor",
+      "type": "llm_google",
+      "label": "Data Extractor — Structured Fields",
+      "config": {
+        "model": "gemini-1.5-pro",
+        "system_prompt": "You are a structured extraction engine for Indian electricity bills (MSEDCL, TSSPDCL, BESCOM, TGSPDCL).\n\nFrom the raw OCR text, extract these fields:\n  meter_number          — string (e.g. MH-GGN-001)\n  discom_id             — one of: MSEDCL, TSSPDCL, TGSPDCL, BESCOM\n  tariff_category       — string (e.g. HT-I, LT-II, HT-2(a))\n  billing_period_start  — YYYY-MM-DD\n  billing_period_end    — YYYY-MM-DD\n  contract_demand_kva   — number\n  recorded_max_demand_kva — number\n  power_factor          — decimal 0.0–1.0\n  units_consumed_kwh    — number\n  energy_charges        — rupees\n  md_penalty_billed     — rupees (0 if not present)\n  pf_penalty_billed     — rupees (0 if not present)\n  fixed_charges         — rupees\n  taxes_and_duties      — rupees\n  total_due             — rupees\n  amount_paid           — rupees\n  outstanding_amount    — rupees\n  due_date              — YYYY-MM-DD\n  payment_status        — one of: Paid, Pending, Overdue, Partial\n\nFor EVERY field: include a confidence score 0.0–1.0 reflecting how clearly it appeared in the text.\n\nReturn ONLY valid JSON:\n{\n  \"extracted\": { <field>: <value or null>, ... },\n  \"confidence_map\": { <field>: <score 0.0-1.0>, ... }\n}",
+        "input_lane": "ocr.raw_text",
+        "temperature": 0,
+        "max_tokens": 2048
+      },
+      "outputs": ["schema_validate"]
+    },
+
+    {
+      "id": "schema_validate",
+      "type": "tool_python",
+      "label": "Schema Validate & Review Flagging",
+      "config": {
+        "code_file": "nodes/bill_line_parser.py",
+        "description": "Validates extracted fields for plausibility:\n  1. Hard threshold: any critical field with confidence < 80% → needs_review=true\n  2. Null checks: contract_demand_kva or recorded_max_demand_kva is null/zero → needs_review=true\n  3. Sanity checks: power_factor must be 0.0–1.0; total_due must be positive\n  4. Cross-check: energy_charges + md_penalty + pf_penalty + fixed_charges ≈ total_due (±10%)\nOutputs a review_flags dict explaining each flag for the human reviewer.",
+        "inline_code": "see nodes/bill_line_parser.py",
+        "allowedModules": ["json", "sys", "re"],
+        "input_lane": "data_extractor.output"
+      },
+      "outputs": ["bills_writer"]
+    },
+
+    {
+      "id": "bills_writer",
+      "type": "rocketride_sql",
+      "label": "Write Bill Record",
+      "config": {
+        "operation": "insert",
+        "table": "bills",
+        "allow_execute": true,
+        "on_conflict": "DO UPDATE SET updated_at = NOW()",
+        "conflict_target": "bill_id",
+        "column_mapping": {
+          "bill_id":                  "AUTO_UUID",
+          "site_id":                  "schema_validate.site_id",
+          "month":                    "schema_validate.month",
+          "meter_number":             "schema_validate.meter_number",
+          "discom_id":                "schema_validate.discom_id",
+          "tariff_category":          "schema_validate.tariff_category",
+          "contract_demand_kva":      "schema_validate.contract_demand_kva",
+          "recorded_max_demand_kva":  "schema_validate.recorded_max_demand_kva",
+          "power_factor":             "schema_validate.power_factor",
+          "units_consumed_kwh":       "schema_validate.units_consumed_kwh",
+          "energy_charges":           "schema_validate.energy_charges",
+          "md_penalty_billed":        "schema_validate.md_penalty_billed",
+          "pf_penalty_billed":        "schema_validate.pf_penalty_billed",
+          "fixed_charges":            "schema_validate.fixed_charges",
+          "taxes_and_duties":         "schema_validate.taxes_and_duties",
+          "total_due":                "schema_validate.total_due",
+          "amount_paid":              "schema_validate.amount_paid",
+          "outstanding_amount":       "schema_validate.outstanding_amount",
+          "due_date":                 "schema_validate.due_date",
+          "payment_status":           "schema_validate.payment_status",
+          "confidence_map":           "schema_validate.confidence_map",
+          "needs_review":             "schema_validate.needs_review",
+          "review_flags":             "schema_validate.review_flags",
+          "source_file":              "drag_drop.filename",
+          "source_type":              "ocr.source_type",
+          "ocr_raw_text":             "ocr.raw_text",
+          "extraction_model":         "gemini-1.5-pro"
+        },
+        "description": "Upserts bill record including the raw OCR text (for review UI side-by-side). Low-confidence bills get needs_review=true."
+      },
+      "outputs": ["pipeline_response"]
+    },
+
+    {
+      "id": "pipeline_response",
+      "type": "response",
+      "label": "Emit bill_id + review status",
+      "config": {
+        "output_template": {
+          "status":        "success",
+          "bill_id":       "{{bills_writer.bill_id}}",
+          "source_file":   "{{drag_drop.filename}}",
+          "source_type":   "{{ocr.source_type}}",
+          "needs_review":  "{{schema_validate.needs_review}}",
+          "review_flags":  "{{schema_validate.review_flags}}",
+          "quality_notes": "{{ocr.quality_notes}}",
+          "message":       "Bill ingested. Trigger pipeline 02_penalty_detection with this bill_id."
+        }
+      }
+    }
+
+  ],
+
+  "connections": [
+    { "from": "drag_drop",       "to": "cleanup" },
+    { "from": "cleanup",         "to": "ocr" },
+    { "from": "ocr",             "to": "data_extractor" },
+    { "from": "data_extractor",  "to": "schema_validate" },
+    { "from": "schema_validate", "to": "bills_writer" },
+    { "from": "bills_writer",    "to": "pipeline_response" }
+  ],
+
+  "metadata": {
+    "discom_scope":          ["MSEDCL", "TSSPDCL", "TGSPDCL", "BESCOM"],
+    "accepted_formats":      ["JPEG", "PNG", "TIFF", "WEBP", "PDF"],
+    "model":                 "gemini-1.5-pro",
+    "confidence_threshold":  0.80,
+    "triggers_pipeline":     "02_penalty_detection",
+    "review_ui":             "Dashboard → Review Queue → click bill row"
+  }
+}

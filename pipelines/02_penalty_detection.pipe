@@ -1,0 +1,181 @@
+{
+  "id": "02_penalty_detection",
+  "name": "PowerAudit — Penalty Detection Pipeline",
+  "description": "Feature #2: Triggered by bill_id from pipeline #1. Runs bill_line_parser → tariff_penalty_calculator → RocketRide Vector (citation) → variance_detector → dollar_impact_scorer → citation_attacher → SQL write findings.",
+  "version": "1.0.0",
+  "nodes": [
+
+    {
+      "id": "trigger",
+      "type": "webhook",
+      "label": "Penalty Detection Trigger",
+      "config": {
+        "method": "POST",
+        "path": "/detect-penalties",
+        "description": "Accepts JSON: { bill_id: string, site_id: string }. Called automatically by pipeline 01 response handler."
+      },
+      "outputs": ["bill_reader"]
+    },
+
+    {
+      "id": "bill_reader",
+      "type": "rocketride_sql",
+      "label": "Read Bill Record",
+      "config": {
+        "operation": "query",
+        "allow_execute": true,
+        "query": "SELECT b.*, s.discom_id, s.state FROM bills b JOIN sites s ON b.site_id = s.site_id WHERE b.bill_id = '{{trigger.body.bill_id}}'",
+        "description": "Fetches the full bill row plus DISCOM/state from sites join."
+      },
+      "outputs": ["line_parser"]
+    },
+
+    {
+      "id": "line_parser",
+      "type": "tool_python",
+      "label": "Bill Line Parser",
+      "config": {
+        "code_file": "nodes/bill_line_parser.py",
+        "description": "Normalises raw bill fields to canonical keys. Handles DISCOM naming variants.",
+        "allowedModules": ["json", "sys", "re"],
+        "input_lane": "bill_reader.rows[0]"
+      },
+      "outputs": ["penalty_calculator"]
+    },
+
+    {
+      "id": "penalty_calculator",
+      "type": "tool_python",
+      "label": "Tariff Penalty Calculator",
+      "config": {
+        "code_file": "nodes/tariff_penalty_calculator.py",
+        "description": "Deterministic MD + PF penalty recalculation. Zero LLM. Covers MSEDCL / TSSPDCL / BESCOM formulas from 2024-25 tariff orders.",
+        "allowedModules": ["json", "sys", "dataclasses"],
+        "input_lane": "line_parser.output"
+      },
+      "outputs": ["tariff_vector_search"]
+    },
+
+    {
+      "id": "tariff_vector_search",
+      "type": "rocketride_vector",
+      "label": "Tariff Citation Vector Search",
+      "config": {
+        "collection": "tariff_docs",
+        "similarity_metric": "cosine",
+        "score_threshold": 0.60,
+        "top_k": 3,
+        "questions": [
+          "{{penalty_calculator.md_clause_ref}}",
+          "{{penalty_calculator.pf_clause_ref}}"
+        ],
+        "description": "Retrieves verbatim tariff clause text to attach as citations to findings. The collection must be pre-loaded with DISCOM tariff order PDFs."
+      },
+      "outputs": ["variance_detector"]
+    },
+
+    {
+      "id": "variance_detector",
+      "type": "tool_python",
+      "label": "Variance Detector",
+      "config": {
+        "code_file": "nodes/variance_detector.py",
+        "description": "Compares billed vs recalculated amounts. Produces OVERCHARGED / UNDERCHARGED / MATCH / INCONCLUSIVE flags with rupee impact.",
+        "allowedModules": ["json", "sys"],
+        "input_template": {
+          "line_items":  "{{line_parser.output}}",
+          "calculation": "{{penalty_calculator.output}}"
+        }
+      },
+      "outputs": ["impact_scorer"]
+    },
+
+    {
+      "id": "impact_scorer",
+      "type": "tool_python",
+      "label": "Dollar Impact Scorer",
+      "config": {
+        "code_file": "nodes/dollar_impact_scorer.py",
+        "description": "Aggregates variance rupee impacts. Computes weighted confidence score (data completeness 40%, OCR confidence 35%, formula certainty 25%). Flags materiality at ₹500.",
+        "allowedModules": ["json", "sys"],
+        "input_template": {
+          "variances":   "{{variance_detector.variances}}",
+          "line_items":  "{{line_parser.output}}",
+          "calculation": "{{penalty_calculator.output}}"
+        }
+      },
+      "outputs": ["citation_attacher"]
+    },
+
+    {
+      "id": "citation_attacher",
+      "type": "tool_python",
+      "label": "Citation Attacher",
+      "config": {
+        "code_file": "nodes/citation_attacher.py",
+        "description": "Merges RocketRide Vector search results onto variance records. Falls back to hardcoded clause refs if Vector score < 0.60.",
+        "allowedModules": ["json", "sys", "re"],
+        "input_template": {
+          "variances":      "{{variance_detector.variances}}",
+          "vector_results": "{{tariff_vector_search.documents}}",
+          "calculation":    "{{penalty_calculator.output}}"
+        }
+      },
+      "outputs": ["findings_writer"]
+    },
+
+    {
+      "id": "findings_writer",
+      "type": "rocketride_sql",
+      "label": "Write Findings",
+      "config": {
+        "operation": "insert_many",
+        "table": "findings",
+        "allow_execute": true,
+        "on_conflict": "DO NOTHING",
+        "conflict_target": "finding_id",
+        "rows_lane": "citation_attacher.findings",
+        "description": "Writes one findings row per variance. finding_id ensures idempotency."
+      },
+      "outputs": ["pipeline_response"]
+    },
+
+    {
+      "id": "pipeline_response",
+      "type": "response",
+      "label": "Emit findings summary",
+      "config": {
+        "output_template": {
+          "status":             "success",
+          "bill_id":            "{{trigger.body.bill_id}}",
+          "findings_count":     "{{citation_attacher.count}}",
+          "total_rupee_impact": "{{impact_scorer.total_rupee_impact}}",
+          "confidence_score":   "{{impact_scorer.confidence_score}}",
+          "materiality_flag":   "{{impact_scorer.materiality_flag}}",
+          "breakdown":          "{{impact_scorer.breakdown}}"
+        }
+      }
+    }
+
+  ],
+
+  "connections": [
+    { "from": "trigger",             "to": "bill_reader" },
+    { "from": "bill_reader",         "to": "line_parser" },
+    { "from": "line_parser",         "to": "penalty_calculator" },
+    { "from": "penalty_calculator",  "to": "tariff_vector_search" },
+    { "from": "tariff_vector_search","to": "variance_detector" },
+    { "from": "variance_detector",   "to": "impact_scorer" },
+    { "from": "impact_scorer",       "to": "citation_attacher" },
+    { "from": "citation_attacher",   "to": "findings_writer" },
+    { "from": "findings_writer",     "to": "pipeline_response" }
+  ],
+
+  "metadata": {
+    "discom_scope":          ["MSEDCL", "TSSPDCL", "BESCOM"],
+    "triggered_by":          "01_bill_ingestion",
+    "vector_collection":     "tariff_docs",
+    "materiality_threshold": 500,
+    "confidence_threshold":  80
+  }
+}

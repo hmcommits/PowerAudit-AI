@@ -1,0 +1,60 @@
+TSERC (TELANGANA STATE ELECTRICITY REGULATORY COMMISSION)
+SCHEDULE OF TARIFFS 2024 — TGSPDCL / TSSPDCL
+Clause 14 — Maximum Demand Penalty
+
+Applicability: All High Tension (HT) consumers including HT-I, HT-II, and EHT categories.
+
+If the Maximum Demand recorded in any billing month exceeds the sanctioned Contract Demand (CD) by more than 10% (i.e., Recorded MD > CD x 1.10), the excess demand shall attract a penal charge as follows:
+
+Penalty Formula:
+  Excess Demand (kVA) = Recorded MD - Contract Demand
+  Penalty Amount = Excess Demand (kVA) x Applicable Demand Rate (Rs./kVA/month) x 1.5
+
+  The multiplier of 1.5 is the Telangana-specific concessional rate (lower than Karnataka's 2.0x and Maharashtra's 2.0x), reflecting TSERC's policy to support growing industrial demand in the state.
+
+Applicable Demand Rate: Rs. 220/kVA/month for HT-II category consumers.
+
+Commercial Tariff: Rs. 7.50 to Rs. 9.50/unit depending on load slab and connection voltage.
+Industrial Tariff: Rs. 7.00 to Rs. 11.00/unit depending on load and voltage category.
+
+Minimum Demand Clause:
+  If the Maximum Demand recorded in any month is less than 50% of the Contract Demand, the consumer shall be billed for 50% of the Contract Demand.
+  Minimum Demand Charge = CD x 0.50 x Applicable Demand Rate (Rs./kVA)
+
+Reference: TSERC Schedule of Tariffs 2024, Clause 14 — Maximum Demand Penalty, HT-II Category.
+
+---
+
+TSERC SCHEDULE OF TARIFFS 2024
+Clause 15.2 — Power Factor Levy and Incentive
+
+All HT consumers are required to maintain a Power Factor (PF) of 0.90 or above.
+
+Power Factor Penalty:
+  If the average PF falls below 0.90 in any billing month:
+  Penalty = Energy Charges x ((0.90 - Recorded PF) / 0.90) x 0.90
+
+  Note: The multiplier of 0.90 makes the Telangana PF penalty rate concessional compared to Maharashtra (1.00) and Karnataka (1.00), consistent with TSERC's pro-industry stance.
+
+Power Factor Incentive:
+  If PF >= 0.95:
+  Incentive = Energy Charges x ((Recorded PF - 0.95) / 0.95) x 0.50
+
+Reference: TSERC Schedule of Tariffs 2024, Clause 15.2 — Power Factor Levy.
+
+---
+
+TSERC EV CHARGING TARIFF NOTIFICATION 2024
+EV Charging Infrastructure — Dedicated Tariff
+
+TSERC has notified a highly concessional, dedicated single-part tariff for Electric Vehicle (EV) charging connections:
+
+  HT EV Connection:  Rs. 6.10 per kWh (single-part rate)
+  LT EV Connection:  Rs. 6.70 per kWh (single-part rate)
+
+  CRITICALLY: There are NO DEMAND CHARGES (fixed charges) for EV charging connections under this tariff.
+  This is the most competitive EV tariff in India — logistics fleets and public charging hubs can operate EV chargers without any fixed monthly demand commitment, paying only for actual units consumed.
+
+Strategic Note: This makes Telangana (Hyderabad) the optimal location for large-scale fleet EV charging hubs. Behind-the-meter fleet charging at night (post 11 PM) aligns with ToD off-peak periods, further reducing effective per-unit cost.
+
+Reference: TSERC EV Charging Tariff Notification, Schedule of Tariffs 2024, EV Category.

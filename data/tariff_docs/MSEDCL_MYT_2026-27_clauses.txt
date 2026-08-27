@@ -1,0 +1,53 @@
+MSEDCL MULTI-YEAR TARIFF ORDER 2026-27
+Clause 7.2(b) — Excess Maximum Demand Charges
+
+Applicability: All High Tension (HT) consumers under HT-I, HT-II, HT-III, and HT-IV categories.
+
+If the Maximum Demand (MD) recorded in any billing month exceeds the sanctioned Contract Demand (CD) by more than 10% (i.e., Recorded MD > CD x 1.10), the following penalty shall apply:
+
+Penalty Formula:
+  Excess Demand (kVA) = Recorded MD - Contract Demand
+  Penalty Amount = Excess Demand (kVA) x Applicable Demand Rate (Rs./kVA) x 2.0
+
+The applicable demand rate is the prevailing monthly demand charge as per the tariff schedule for the consumer's tariff category (e.g., Rs. 250/kVA/month for HT-I).
+
+The 10% tolerance band is designed to allow for short-duration demand spikes without penalty. Sustained excess above this threshold for two or more consecutive months may attract enhanced scrutiny and may result in revision of Contract Demand by the DISCOM.
+
+Minimum Demand Clause:
+If the Maximum Demand recorded in any month is less than 50% of the Contract Demand, the consumer shall be billed for 50% of the Contract Demand as the Minimum Demand.
+  Minimum Demand Charge = CD x 0.50 x Applicable Demand Rate (Rs./kVA)
+
+Reference: MERC (Multi Year Tariff) Regulations 2024, MSEDCL MYT Order dated 2026-27, Schedule of Tariffs, Section 7, Sub-clause 7.2(b).
+
+---
+
+MSEDCL MULTI-YEAR TARIFF ORDER 2026-27
+Clause 8.1 — Power Factor Surcharge and Incentive
+
+All High Tension (HT) consumers are required to maintain a Power Factor (PF) of 0.90 or above at all times.
+
+Power Factor Penalty:
+  If the average Power Factor recorded in any billing month falls below 0.90:
+  Penalty = Energy Charges for the Month x ((0.90 - Recorded PF) / 0.90) x 1.00
+
+Power Factor Incentive:
+  If the average Power Factor is 0.95 or above:
+  Incentive = Energy Charges for the Month x ((Recorded PF - 0.95) / 0.95) x 0.50
+  This incentive is credited to the consumer's account.
+
+Target: Consumers are encouraged to install Automatic Power Factor Correction (APFC) panels to maintain PF >= 0.95 at all times. Sustained PF >= 0.95 results in measurable OPEX savings via DISCOM rebates.
+
+EV Charging Tariff (2026-27):
+  MSEDCL has fixed a dedicated EV charging tariff at Rs. 9.50 per unit for both HT and LT EV connections.
+  Demand charges are applicable based on the sanctioned load for the EV connection.
+  Important: EV charging must be on a SEPARATE, dedicated meter. Mixing EV load with commercial/industrial load will cause unplanned Maximum Demand spikes and trigger excess MD penalties.
+
+Reference: MERC (Multi Year Tariff) Regulations 2024, MSEDCL MYT Order 2026-27, Clause 8.1.
+
+---
+
+MSEDCL — Green Energy Open Access (GEOA) Policy
+  Available for consumers with sanctioned load >= 100 kW.
+  Aggregation (consortium) of multiple franchise outlets/sites is permitted to reach the 100 kW threshold.
+  Landed cost via GEOA PPA with solar/wind: Rs. 4.00 - 4.80/unit (vs grid Rs. 9.50+).
+  Reference: MERC GEOA Regulations 2023, Maharashtra RE Policy 2024.
