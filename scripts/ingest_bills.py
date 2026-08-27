@@ -16,7 +16,6 @@ import glob
 import os
 import re
 import sys
-import uuid
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -190,7 +189,12 @@ async def main():
                 summary.append((name, "REJECTED", reasons, None))
                 continue
 
-            bill_id = f"bill-{uuid.uuid4().hex[:12]}"
+            # Deterministic, not uuid.uuid4() - re-running this script against
+            # the same synthetic fixture must UPDATE that bill's one row, not
+            # accumulate a fresh duplicate every run (a random id let exactly
+            # that happen across earlier Feature 1/2 sessions; cleaned up in
+            # Feature 3's build - see docs/CLAUDE.md Backlog).
+            bill_id = f"bill-{os.path.splitext(name)[0]}"
             import json as _json
 
             await client.database.query(
@@ -198,7 +202,12 @@ async def main():
                 sql=(
                     "INSERT INTO bill (bill_id, meter_id, period_start, period_end, "
                     "recorded_md, recorded_pf, line_items, total_due, source_doc_ref, needs_review) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                    "ON CONFLICT (bill_id) DO UPDATE SET "
+                    "meter_id = EXCLUDED.meter_id, period_start = EXCLUDED.period_start, "
+                    "period_end = EXCLUDED.period_end, recorded_md = EXCLUDED.recorded_md, "
+                    "recorded_pf = EXCLUDED.recorded_pf, line_items = EXCLUDED.line_items, "
+                    "total_due = EXCLUDED.total_due, needs_review = EXCLUDED.needs_review"
                 ),
                 params=[
                     bill_id,

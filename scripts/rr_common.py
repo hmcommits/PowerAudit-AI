@@ -10,6 +10,10 @@ BILL_INGESTION_PROJECT_ID = "a7c4e8f2-1d6b-4c9a-9e3f-2b7d5a8c6e91"
 BILL_INGESTION_SOURCE = "dropper_1"
 BILL_INGESTION_PIPE_PATH = os.path.join(os.path.dirname(__file__), "..", "pipelines", "bill-ingestion.pipe")
 
+TREND_RECOMMENDATION_PROJECT_ID = "c9e1b5d7-8a4f-4e12-9c6d-3b7a5f2e9d84"
+TREND_RECOMMENDATION_SOURCE = "chat_1"
+TREND_RECOMMENDATION_PIPE_PATH = os.path.join(os.path.dirname(__file__), "..", "pipelines", "trend-recommendation.pipe")
+
 VECTOR_COLLECTION = "tariff_orders"
 VECTOR_INGEST_PROJECT_ID = "d1e9c2b7-6a4f-4e21-9c3a-7b5d2f8e1a44"
 VECTOR_QUERY_PROJECT_ID = "f4a7d3c1-2b6e-4a95-8f1d-3c9b6e4a7f22"
@@ -218,6 +222,63 @@ def build_bill_ingestion_pipeline():
         ],
         "source": "dropper_1",
         "project_id": BILL_INGESTION_PROJECT_ID,
+        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "version": 1,
+    }
+
+
+def build_trend_recommendation_pipeline():
+    # Feature 3 step 3: turns a detected trend (from trend_classifier.py,
+    # deterministic) into a plain-language recommendation. agent_crewai is
+    # the only agent-family node with a real free-text `instructions` field
+    # (unlike extract_data/extract_facts - see docs/CLAUDE.md Backlog), so
+    # no prompt-hardening concerns here: this step is meant to be
+    # LLM-authored prose, not a value we need transcribed faithfully.
+    chat_1 = node(
+        "chat_1",
+        "chat",
+        {"hideForm": True, "mode": "Source", "parameters": {}, "type": "chat"},
+    )
+    agent_crewai_1 = node(
+        "agent_crewai_1",
+        "agent_crewai",
+        {
+            "agent_description": "Turns a detected electricity-bill Maximum Demand or Power Factor trend into an actionable plain-language recommendation.",
+            "instructions": [
+                "You are an electricity billing analyst for PowerAudit AI, advising Indian commercial/industrial consumers.",
+                "You will be given a detected trend: either a meter's Maximum Demand (MD) trending up toward its Contract Demand (CD), or its Power Factor (PF) trending down toward a penalty threshold, with the exact numbers (slope, months to projected breach, projected value).",
+                "Write a concise, plain-language recommendation of 1-3 sentences for what the business should do (e.g. raise Contract Demand, service the capacitor bank, investigate the load pattern causing the rise).",
+                "Cite the specific numbers you were given (e.g. months to breach, projected value). Do not invent numbers, dates, or facts not present in the input.",
+            ],
+            "require_tool_call": False,
+            "advanced_mode": False,
+            "parameters": {},
+        },
+        input_=[{"lane": "questions", "from": "chat_1"}],
+        ui={"position": {"x": 240, "y": 200}, "measured": {"width": 150, "height": 86}, "nodeType": "default", "formDataValid": True},
+    )
+    llm_gemini_1 = node(
+        "llm_gemini_1",
+        "llm_gemini",
+        {
+            "profile": "models-gemini-3-5-flash-lite",
+            "models-gemini-3-5-flash-lite": {"apikey": "${ROCKETRIDE_GEMINI_KEY}"},
+            "parameters": {},
+        },
+        control=[{"classType": "llm", "from": "agent_crewai_1"}],
+        ui={"position": {"x": 240, "y": 360}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+    )
+    response_1 = node(
+        "response_answers_1",
+        "response_answers",
+        {"laneName": "answers"},
+        input_=[{"lane": "answers", "from": "agent_crewai_1"}],
+        ui={"position": {"x": 460, "y": 200}, "measured": {"width": 150, "height": 66}, "nodeType": "default", "formDataValid": True},
+    )
+    return {
+        "components": [chat_1, agent_crewai_1, llm_gemini_1, response_1],
+        "source": "chat_1",
+        "project_id": TREND_RECOMMENDATION_PROJECT_ID,
         "viewport": {"x": 0, "y": 0, "zoom": 1},
         "version": 1,
     }

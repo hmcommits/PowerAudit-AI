@@ -20,6 +20,9 @@ from calculators.bill_line_parser import (
 from calculators.tariff_penalty_calculator import calculate_md_penalty, calculate_pf_adjustment
 from calculators.variance_detector import detect_variances
 from calculators.dollar_impact_scorer import score_finding, score_findings
+from calculators.history_aggregator import build_history
+from calculators.trend_classifier import classify_cd_trend, classify_pf_trend
+from calculators.what_if import what_if_cd_change
 
 
 class TestParseAmount(unittest.TestCase):
@@ -265,6 +268,124 @@ class TestDollarImpactScorer(unittest.TestCase):
         self.assertEqual(len(scored), 2)
         self.assertEqual(scored[0]["rupee_impact"], 39375.0)
         self.assertEqual(scored[1]["rupee_impact"], 8200.0)
+
+
+def _rows(md_series=None, pf_series=None, start_year=2026, start_month=1):
+    """Build history_aggregator-ready rows: one per month starting at
+    (start_year, start_month), for whichever of md_series/pf_series is
+    given (missing values default to a fixed placeholder in the other
+    field so build_history doesn't drop the row)."""
+    n = len(md_series) if md_series is not None else len(pf_series)
+    md_series = md_series or [100.0] * n
+    pf_series = pf_series or [0.95] * n
+    rows = []
+    for i in range(n):
+        month = start_month + i
+        year = start_year + (month - 1) // 12
+        month = ((month - 1) % 12) + 1
+        rows.append({"period_start": f"{year:04d}-{month:02d}-01", "recorded_md": md_series[i], "recorded_pf": pf_series[i]})
+    return rows
+
+
+class TestHistoryAggregator(unittest.TestCase):
+    def test_sorted_and_month_indexed(self):
+        rows = _rows(md_series=[400, 420, 440])
+        history = build_history(rows)
+        self.assertEqual([h["month_index"] for h in history], [0, 1, 2])
+        self.assertEqual([h["recorded_md"] for h in history], [400.0, 420.0, 440.0])
+
+    def test_out_of_order_rows_get_sorted(self):
+        rows = _rows(md_series=[400, 420, 440])
+        shuffled = [rows[2], rows[0], rows[1]]
+        history = build_history(shuffled)
+        self.assertEqual([h["recorded_md"] for h in history], [400.0, 420.0, 440.0])
+
+    def test_rows_missing_fields_are_dropped(self):
+        rows = _rows(md_series=[400, 420, 440])
+        rows[1]["recorded_pf"] = None
+        history = build_history(rows)
+        self.assertEqual(len(history), 2)
+
+
+class TestCDTrendClassifier(unittest.TestCase):
+    def test_insufficient_data(self):
+        history = build_history(_rows(md_series=[400, 420]))
+        result = classify_cd_trend(history, contract_demand_kva=530)
+        self.assertEqual(result["status"], "insufficient_data")
+
+    def test_rising_trend_triggers_breach_risk_hand_calculated(self):
+        # Perfectly linear: recorded_md = 400, 420, ..., 500 (slope=20/month).
+        # Hand calc: x_mean=2.5, y_mean=450, slope=20.0, intercept=400.0
+        #            projected at x=5+2=7: 20*7+400 = 540 >= CD 530 -> risk
+        #            months_to_breach = (530-500)/20 = 1.5
+        history = build_history(_rows(md_series=[400, 420, 440, 460, 480, 500]))
+        result = classify_cd_trend(history, contract_demand_kva=530)
+        self.assertEqual(result["status"], "cd-breach-risk")
+        self.assertEqual(result["slope_kva_per_month"], 20.0)
+        self.assertEqual(result["months_to_breach"], 1.5)
+        self.assertEqual(result["projected_md_at_horizon"], 540.0)
+
+    def test_flat_trend_does_not_trigger(self):
+        history = build_history(_rows(md_series=[250, 250, 250, 250, 250, 250]))
+        result = classify_cd_trend(history, contract_demand_kva=300)
+        self.assertEqual(result["status"], "flat_or_declining")
+        self.assertEqual(result["slope_kva_per_month"], 0.0)
+
+    def test_already_breached(self):
+        history = build_history(_rows(md_series=[480, 490, 510]))
+        result = classify_cd_trend(history, contract_demand_kva=500)
+        self.assertEqual(result["status"], "already_breached")
+
+    def test_rising_but_not_enough_to_cross_horizon(self):
+        # Same slope as the risk case, but CD is far enough away that the
+        # 2-month projection doesn't reach it: 20*7+400 = 540 < CD 600.
+        history = build_history(_rows(md_series=[400, 420, 440, 460, 480, 500]))
+        result = classify_cd_trend(history, contract_demand_kva=600)
+        self.assertEqual(result["status"], "on_track")
+
+
+class TestPFTrendClassifier(unittest.TestCase):
+    def test_declining_trend_triggers_decline_risk_hand_calculated(self):
+        # Perfectly linear: recorded_pf = 0.98, 0.96, ..., 0.88 (slope=-0.02/month).
+        # Hand calc: intercept=0.98, projected at x=7: -0.02*7+0.98 = 0.84 <= 0.85 -> risk
+        #            months_to_breach = (0.88-0.85)/0.02 = 1.5
+        history = build_history(_rows(pf_series=[0.98, 0.96, 0.94, 0.92, 0.90, 0.88]))
+        result = classify_pf_trend(history, pf_threshold=0.85)
+        self.assertEqual(result["status"], "pf-decline-risk")
+        self.assertEqual(result["slope_per_month"], -0.02)
+        self.assertEqual(result["months_to_breach"], 1.5)
+        self.assertEqual(result["projected_pf_at_horizon"], 0.84)
+
+    def test_flat_pf_does_not_trigger(self):
+        history = build_history(_rows(pf_series=[0.95] * 6))
+        result = classify_pf_trend(history, pf_threshold=0.90)
+        self.assertEqual(result["status"], "flat_or_improving")
+
+    def test_already_breached(self):
+        history = build_history(_rows(pf_series=[0.92, 0.90, 0.87]))
+        result = classify_pf_trend(history, pf_threshold=0.90)
+        self.assertEqual(result["status"], "already_breached")
+
+
+class TestWhatIf(unittest.TestCase):
+    def test_cd_raise_savings_hand_calculated(self):
+        # Same rising series as the breach-risk test: projected_md = 540.0.
+        # Hand calc at current CD=530: excess=540-530=10 -> 10*450*1.75=7875.0
+        # Hand calc at hypothetical CD=560: excess=540-560=-20 -> no excess -> 0.0
+        # Savings = 7875.0 - 0.0 = 7875.0
+        history = build_history(_rows(md_series=[400, 420, 440, 460, 480, 500]))
+        params = {"demand_charge_rate": 450, "penalty_multiplier": 1.75}
+        result = what_if_cd_change(history, current_cd=530, hypothetical_cd=560, tariff_params=params)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["projected_md_at_horizon"], 540.0)
+        self.assertEqual(result["current_projected_penalty"], 7875.0)
+        self.assertEqual(result["hypothetical_projected_penalty"], 0.0)
+        self.assertEqual(result["projected_savings"], 7875.0)
+
+    def test_insufficient_data(self):
+        history = build_history(_rows(md_series=[400, 420]))
+        result = what_if_cd_change(history, current_cd=530, hypothetical_cd=560, tariff_params={"demand_charge_rate": 450, "penalty_multiplier": 1.75})
+        self.assertEqual(result["status"], "insufficient_data")
 
 
 if __name__ == "__main__":

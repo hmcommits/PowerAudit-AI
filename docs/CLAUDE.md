@@ -281,6 +281,28 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
   `ast.literal_eval()` instead of `json.loads()` on any `jsonb` column read
   back this way (safe here since it's our own application data, not
   external input) - see `scripts/recalculate_bills.py`.
+- **`get_task_status()`'s `state` field is an integer code, not the
+  documented string enum.** `ROCKETRIDE_python_API.md` says `state` is one
+  of `'starting'`/`'running'`/`'waiting'`/`'completed'`/`'failed'`/
+  `'terminated'`; in practice it's an int (observed value `3` for a live,
+  ready task). Comparing it against the documented strings always evaluates
+  false, so a liveness check built on it silently treats every live task as
+  dead (discovered building Feature 3's `ensure_trend_recommendation_token`
+  - it kept starting a redundant new pipeline instance until the old one's
+  `use()` collided with "Pipeline is already running"). Use the `completed`
+  boolean instead (`completed is False` means still alive) - see
+  `scripts/scan_trend_alerts.py`.
+- **Fixed: `scripts/ingest_bills.py` used to generate a random `bill_id`
+  every run** (`uuid.uuid4()`), so re-running it against the same synthetic
+  fixtures - which happened repeatedly across Feature 1/2 development -
+  accumulated duplicate `Bill` rows for the same source document instead of
+  updating one row. Fixed by deriving `bill_id` deterministically from the
+  source filename and using `ON CONFLICT (bill_id) DO UPDATE`, matching the
+  pattern `scripts/seed_trend_history.py` already used. 28 duplicate rows
+  (and their duplicate Findings) were found and cleaned up while building
+  Feature 3; the bill table is now exactly 33 rows (14 from the 18 Feature 1
+  synthetic fixtures - 4 rejected - plus 19 from Feature 3's T01/T02/T03
+  history, matching design intent exactly).
 
 ---
 
