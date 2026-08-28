@@ -212,11 +212,11 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 
 ## Backlog / known limitations (found during build, not yet actioned)
 
-> ⚠️ **STANDING RISK — read before touching any MD/PF formula, constant, or
-> the Claim.status state machine.**
-> Deterministic logic that MUST stay LLM-free exists in **two places** for
-> two separate features, each pair kept manually in sync with no shared
-> source and no automated check that they agree:
+> ⚠️ **STANDING RISK — read before touching any MD/PF formula, constant,
+> the Claim.status state machine, or foundation-sql connection handling.**
+> Logic that MUST behave identically in the browser and in the dev scripts
+> exists in **three places**, each pair kept manually in sync with no
+> shared source and no automated check that they agree:
 > - Recalculation math (Feature 2) —
 >   Python: `calculators/bill_line_parser.py`, `tariff_penalty_calculator.py`,
 >   `variance_detector.py`, `dollar_impact_scorer.py`;
@@ -224,29 +224,61 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 > - Claim approval state machine (Feature 4) —
 >   Python: `calculators/claim_workflow.py`;
 >   TypeScript: `apps/poweraudit-ai-ui/src/lib/claimWorkflow.ts`
+> - foundation-sql token liveness-check + auto-start (Feature 5's own
+>   plumbing, not a Section 2/3/4 feature, but the same duplication risk) —
+>   Python: `scripts/rr_common.py`'s `ensure_foundation_sql_token` +
+>   `build_foundation_sql_pipeline`;
+>   TypeScript: `apps/poweraudit-ai-ui/src/lib/db.ts`'s `getFoundationToken`
+>   + `buildFoundationSqlPipeline`
 >
-> This split exists because no RocketRide pipeline node runs arbitrary
+> The first two exist because no RocketRide pipeline node runs arbitrary
 > deterministic Python on demand (`tool_python`'s direct-invoke path
 > doesn't work - see below) and the browser can't execute the Python
 > scripts directly, so any interactive (browser-triggered) feature needing
 > this logic needs its own client-side port. Feature 5's interactive upload
 > needed the calculator port; Feature 5's interactive claim approval hit
 > the identical constraint and got the identical fix - ported, not treated
-> as a new discovery, the moment it came up. **This is not a one-time
-> note - it is a standing maintenance obligation, and it applies to any
-> future port too.** Any future change to a formula, a threshold, a
-> rounding rule, `STUB_TARIFF_PARAMS`/`STUB_CITATION`, a valid state
-> transition, or the approval guard MUST be applied to **both**
-> implementations of whichever pair it touches and then re-verified
-> identical - see `apps/poweraudit-ai-ui/scripts/test-calculator-parity.mts`
-> (diffs every Finding the TypeScript calculators would produce against the
+> as a new discovery, the moment it came up. The third exists for a
+> different reason: the always-on foundation-sql host task gets **idle-
+> reaped by the server** after some idle period even at `ttl=0` (observed
+> directly, confirmed via Server Monitor showing 0 running tasks) - the
+> Python scripts already handled this (a cached/resolved token is checked
+> live via `database.dialect()` before being trusted, and the pipeline is
+> started fresh otherwise), but `db.ts`'s `getFoundationToken` was written
+> without the "start fresh otherwise" half and only mirrored the liveness
+> *check*, not the recovery - so every dashboard view broke with "no task
+> token resolved" the first time the host task got reaped during this
+> build, instead of self-healing the way the Python scripts always did.
+> Ported properly now (ordered attempts identical to
+> `ensure_foundation_sql_token`: cached token -> live check; fresh
+> `getTaskToken()` -> live check; else start via `client.use()`), plus
+> `useSqlQuery.ts` now retries automatically (with a "Reconnecting…" state)
+> before surfacing a hard error, since this can recur mid-demo, not just
+> during development.
+>
+> **This is not a one-time note - it is a standing maintenance obligation,
+> and it applies to any future port too.** Any future change to a formula,
+> a threshold, a rounding rule, `STUB_TARIFF_PARAMS`/`STUB_CITATION`, a
+> valid state transition, the approval guard, the foundation-sql project/
+> source ids, or the pipeline's node graph MUST be applied to **both**
+> implementations of whichever pair it touches and then re-verified before
+> being considered done. For the first two pairs there's an automated
+> check: `apps/poweraudit-ai-ui/scripts/test-calculator-parity.mts` (diffs
+> every Finding the TypeScript calculators would produce against the
 > Python-computed Finding already in RocketRide SQL, for every real bill on
 > file) and `apps/poweraudit-ai-ui/scripts/test-claim-workflow-parity.mts`
 > (runs `calculators/test_calculators.py`'s `TestClaimWorkflow` cases
-> against the TypeScript port and confirms identical accept/reject
-> behavior) - before being considered done. A change applied to only one
-> side will silently diverge - there is no compiler, linter, or test that
-> catches this on its own; running the relevant parity script is the check.
+> against the TypeScript port). The third pair has **no** automated parity
+> check - it's live connection-management behavior (idle-reaping is a
+> server-side condition, not something a unit test can assert on cheaply),
+> so keeping `getFoundationToken`/`buildFoundationSqlPipeline` in sync with
+> `ensure_foundation_sql_token`/`build_foundation_sql_pipeline` is a manual
+> side-by-side review on any change to either - flagged here precisely
+> because that's easy to forget without a test to catch it. A change
+> applied to only one side of any of these three pairs will silently
+> diverge - there is no compiler, linter, or test that catches this on its
+> own for the first two without deliberately running the parity script,
+> and nothing at all catches it for the third.
 
 - **SDK's `onTrace` redacts credential-shaped fields structurally, not by
   value.** While verifying the Gemini key never leaves the client resolved

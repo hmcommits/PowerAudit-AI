@@ -54,6 +54,7 @@ export const PortfolioView: React.FC = () => {
 	const typeImpact = useSqlQuery<TypeImpactRow>(IMPACT_BY_TYPE_SQL);
 
 	const loading = findings.loading || alerts.loading || claims.loading;
+	const retrying = findings.retrying || alerts.retrying || claims.retrying;
 	const error = findings.error ?? alerts.error ?? claims.error;
 
 	const refreshAll = () => {
@@ -93,7 +94,7 @@ export const PortfolioView: React.FC = () => {
 								<div style={SUBTLE_TEXT_STYLE}>Total disputed impact</div>
 								<div style={{ marginTop: 4 }}>
 									{loading && !findings.rows ? (
-										<span style={{ fontSize: 32, fontWeight: 700, color: 'var(--rr-text-secondary)' }}>…</span>
+										<span style={{ fontSize: 32, fontWeight: 700, color: 'var(--rr-text-secondary)' }}>{retrying ? 'Reconnecting…' : '…'}</span>
 									) : (
 										<MoneyValue value={findings.rows?.[0]?.total_impact ?? 0} size="xl" />
 									)}
@@ -109,7 +110,9 @@ export const PortfolioView: React.FC = () => {
 
 					<Card header="Disputed impact by finding type">
 						{typeImpact.error && <Banner variant="error">{typeImpact.error}</Banner>}
-						{!typeImpact.error && typeImpact.loading && !typeImpact.rows && <LoadingState label="Loading breakdown…" />}
+						{!typeImpact.error && typeImpact.loading && !typeImpact.rows && (
+							<LoadingState label={typeImpact.retrying ? 'Reconnecting…' : 'Loading breakdown…'} />
+						)}
 						{!typeImpact.error && typeImpact.rows && (
 							<div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 								{typeImpact.rows.map((row) => {

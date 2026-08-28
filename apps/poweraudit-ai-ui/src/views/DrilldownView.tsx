@@ -217,7 +217,7 @@ export const DrilldownView: React.FC = () => {
 				}
 			/>
 			{meters.error && <Banner variant="error">{meters.error}</Banner>}
-			{!meters.error && meters.loading && !meters.rows && <LoadingState label="Loading meters…" />}
+			{!meters.error && meters.loading && !meters.rows && <LoadingState label={meters.retrying ? 'Reconnecting…' : 'Loading meters…'} />}
 			{!meters.error && meters.rows && meters.rows.length === 0 && (
 				<EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py to populate RocketRide SQL." />
 			)}
@@ -262,17 +262,26 @@ export const DrilldownView: React.FC = () => {
 								{activeMeter.site_name}
 							</Banner>
 						)}
-						<CardDataGridSection title="Bills" columns={billColumns} rows={bills.rows} error={bills.error} loading={bills.loading} emptyLabel="No bills for this meter." />
+						<CardDataGridSection title="Bills" columns={billColumns} rows={bills.rows} error={bills.error} loading={bills.loading} retrying={bills.retrying} emptyLabel="No bills for this meter." />
 						<CardDataGridSection
 							title="Findings"
 							columns={findingColumns}
 							rows={findings.rows}
 							error={findings.error}
 							loading={findings.loading}
+							retrying={findings.retrying}
 							emptyLabel="No findings for this meter."
 						/>
-						<CardDataGridSection title="Alerts" columns={alertColumns} rows={alerts.rows} error={alerts.error} loading={alerts.loading} emptyLabel="No predictive alerts for this meter." />
-						<ClaimsPanel rows={claims.rows} error={claims.error} loading={claims.loading} client={client} onApproved={() => void claims.refetch()} />
+						<CardDataGridSection
+							title="Alerts"
+							columns={alertColumns}
+							rows={alerts.rows}
+							error={alerts.error}
+							loading={alerts.loading}
+							retrying={alerts.retrying}
+							emptyLabel="No predictive alerts for this meter."
+						/>
+						<ClaimsPanel rows={claims.rows} error={claims.error} loading={claims.loading} retrying={claims.retrying} client={client} onApproved={() => void claims.refetch()} />
 					</div>
 				</div>
 			)}
@@ -286,9 +295,10 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
 	rows: T[] | null;
 	error: string | null;
 	loading: boolean;
+	retrying: boolean;
 	emptyLabel: string;
 }): React.ReactElement {
-	const { title, columns, rows, error, loading, emptyLabel } = props;
+	const { title, columns, rows, error, loading, retrying, emptyLabel } = props;
 	if (error) {
 		return (
 			<Card header={title}>
@@ -299,7 +309,7 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
 	if (loading && !rows) {
 		return (
 			<Card header={title}>
-				<LoadingState label={`Loading ${title.toLowerCase()}…`} />
+				<LoadingState label={retrying ? 'Reconnecting…' : `Loading ${title.toLowerCase()}…`} />
 			</Card>
 		);
 	}
@@ -324,8 +334,15 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
  * this component - the Button being disabled is a UI nicety, not the
  * enforcement.
  */
-function ClaimsPanel(props: { rows: ClaimRow[] | null; error: string | null; loading: boolean; client: RocketRideClient | null; onApproved: () => void }): React.ReactElement {
-	const { rows, error, loading, client, onApproved } = props;
+function ClaimsPanel(props: {
+	rows: ClaimRow[] | null;
+	error: string | null;
+	loading: boolean;
+	retrying: boolean;
+	client: RocketRideClient | null;
+	onApproved: () => void;
+}): React.ReactElement {
+	const { rows, error, loading, retrying, client, onApproved } = props;
 	if (error) {
 		return (
 			<Card header="Claims">
@@ -336,7 +353,7 @@ function ClaimsPanel(props: { rows: ClaimRow[] | null; error: string | null; loa
 	if (loading && !rows) {
 		return (
 			<Card header="Claims">
-				<LoadingState label="Loading claims…" />
+				<LoadingState label={retrying ? 'Reconnecting…' : 'Loading claims…'} />
 			</Card>
 		);
 	}

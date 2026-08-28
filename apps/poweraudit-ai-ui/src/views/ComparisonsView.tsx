@@ -112,7 +112,7 @@ export const ComparisonsView: React.FC = () => {
 				}
 			/>
 			{stats.error && <Banner variant="error">{stats.error}</Banner>}
-			{!stats.error && stats.loading && !stats.rows && <LoadingState label="Loading comparisons…" />}
+			{!stats.error && stats.loading && !stats.rows && <LoadingState label={stats.retrying ? 'Reconnecting…' : 'Loading comparisons…'} />}
 			{!stats.error && stats.rows && stats.rows.length === 0 && <EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py first." />}
 			{!stats.error && ranked.length > 0 && (
 				<>

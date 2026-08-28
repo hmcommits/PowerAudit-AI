@@ -23,12 +23,76 @@ export const FOUNDATION_SOURCE = 'tools_1';
 
 let cachedToken: string | null = null;
 
+/** Bare node-builder, mirroring scripts/rr_common.py's `node()` helper -
+ * same default `ui` block when the caller doesn't supply one. */
+function node(id: string, provider: string, config: Record<string, unknown>, extra?: { control?: unknown[]; ui?: Record<string, unknown> }): Record<string, unknown> {
+	const c: Record<string, unknown> = { id, provider, config };
+	if (extra?.control) c.control = extra.control;
+	c.ui = extra?.ui ?? { position: { x: 20, y: 200 }, measured: { width: 150, height: 66 }, nodeType: 'default', formDataValid: true };
+	return c;
+}
+
 /**
- * Resolve a live task token for foundation-sql.pipe. Mirrors
- * scripts/rr_common.py's ensure_foundation_sql_token: getTaskToken can
- * resolve a project/source mapping whose underlying task has since been
- * terminated, so a cached token is verified with a cheap real call
- * (database.dialect) before being trusted, and re-resolved otherwise.
+ * TypeScript port of scripts/rr_common.py's build_foundation_sql_pipeline() -
+ * same node graph (tools -> rocketride_sql -> llm_gemini), same ids, same
+ * config, so getFoundationToken() can start this pipeline itself instead of
+ * assuming it's already running. See docs/CLAUDE.md's standing-risk note:
+ * this and getFoundationToken's liveness-check/auto-start logic below are
+ * now a third piece of logic duplicated between Python and TypeScript and
+ * must be kept in sync by hand.
+ */
+function buildFoundationSqlPipeline(): Record<string, unknown> {
+	const tools1 = node('tools_1', 'tools', { hideForm: true, mode: 'Source', parameters: {}, type: 'tools' });
+	const rocketrideSql1 = node(
+		'rocketride_sql_1',
+		'rocketride_sql',
+		{
+			profile: 'default',
+			default: {
+				db_description:
+					'PowerAudit AI relational store: Site, Meter, TariffOrder, Bill, Finding, Alert, Claim tables for auditing Indian commercial/industrial electricity bills (MD/PF penalty recalculation, disputes, claims).',
+				table: '_direct_execute',
+				max_attempts: 5,
+				allow_execute: true,
+			},
+			parameters: {},
+		},
+		{ control: [{ classType: 'tool', from: 'tools_1' }], ui: { position: { x: 240, y: 200 }, measured: { width: 150, height: 135 }, nodeType: 'default', formDataValid: true } },
+	);
+	const llmGemini1 = node(
+		'llm_gemini_1',
+		'llm_gemini',
+		{ profile: 'models-gemini-3-5-flash-lite', 'models-gemini-3-5-flash-lite': { apikey: '${ROCKETRIDE_GEMINI_KEY}' }, parameters: {} },
+		{ control: [{ classType: 'llm', from: 'rocketride_sql_1' }], ui: { position: { x: 240, y: 360 }, measured: { width: 150, height: 66 }, nodeType: 'default', formDataValid: true } },
+	);
+	return {
+		components: [tools1, rocketrideSql1, llmGemini1],
+		source: FOUNDATION_SOURCE,
+		project_id: FOUNDATION_PROJECT_ID,
+		viewport: { x: 0, y: 0, zoom: 1 },
+		version: 1,
+	};
+}
+
+/**
+ * Resolve a live task token for foundation-sql.pipe, STARTING it if it
+ * isn't already running - full port of scripts/rr_common.py's
+ * ensure_foundation_sql_token, not just its liveness-check half. Found by
+ * testing against the real server: the previous version of this function
+ * re-resolved a project/source mapping via getTaskToken() on a cache miss
+ * but never verified THAT token was actually alive, and never fell back to
+ * starting the pipeline - so once the always-on host task got idle-reaped
+ * server-side (confirmed via Server Monitor showing 0 running tasks - the
+ * same reaping behavior already documented for the Python scripts), every
+ * view relying on this silently broke with "no task token resolved"
+ * instead of self-healing the way ingest_bills.py/recalculate_bills.py do.
+ *
+ * Order of attempts, exactly matching the Python version: (1) a cached
+ * token, verified live via database.dialect(); (2) a fresh getTaskToken()
+ * resolution, ALSO verified live (a resolved project/source mapping can
+ * point at an already-dead task); (3) start the pipeline fresh via
+ * client.use() and cache the new token. Only step 3 can throw - a genuine
+ * connection failure should surface as a real error, not a silent null.
  */
 export async function getFoundationToken(client: RocketRideClient): Promise<string | null> {
 	if (cachedToken) {
@@ -39,13 +103,32 @@ export async function getFoundationToken(client: RocketRideClient): Promise<stri
 			cachedToken = null;
 		}
 	}
+
 	try {
 		const token = await client.getTaskToken({ projectId: FOUNDATION_PROJECT_ID, source: FOUNDATION_SOURCE });
-		if (token) cachedToken = token;
-		return token ?? null;
+		if (token) {
+			try {
+				await client.database.dialect({ token });
+				cachedToken = token;
+				return token;
+			} catch {
+				// Resolved a token, but the task behind it is dead (idle-reaped) -
+				// fall through to starting a fresh one, same as the Python guard.
+			}
+		}
 	} catch {
-		return null;
+		// getTaskToken() itself throws when no project/source mapping exists
+		// yet (e.g. the very first run) - also falls through to starting fresh.
 	}
+
+	const result = await client.use({
+		pipeline: buildFoundationSqlPipeline() as any,
+		source: FOUNDATION_SOURCE,
+		ttl: 0,
+		name: 'poweraudit-foundation-sql',
+	});
+	cachedToken = result.token;
+	return result.token;
 }
 
 /** Thin wrapper over client.database.query() typed for our row shapes. */
