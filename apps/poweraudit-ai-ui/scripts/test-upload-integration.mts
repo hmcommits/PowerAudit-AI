@@ -38,7 +38,10 @@ function loadEnv(): Record<string, string> {
 	const text = fs.readFileSync(path.join(REPO_ROOT, '.env'), 'utf8');
 	const env: Record<string, string> = {};
 	for (const line of text.split('\n')) {
-		const m = line.match(/^([A-Z_]+)=(.*)$/);
+		// Strip a trailing CR first: JS '.' does not match a carriage return,
+		// so a CRLF .env silently parses to zero keys and every call then
+		// fails with a confusing 'No authorization provided'.
+		const m = line.replace(/\r$/, '').match(/^([A-Z_]+)=(.*)$/);
 		if (m) env[m[1]] = m[2].trim();
 	}
 	return env;
