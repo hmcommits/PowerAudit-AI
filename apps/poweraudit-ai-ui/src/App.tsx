@@ -16,7 +16,8 @@
 
 import React, { useMemo, useState } from 'react';
 import type { ShellAppProps } from 'shell';
-import { AppLayout, SidebarMenu } from 'shell';
+import { AppLayout, SidebarMenu, useShellEvent } from 'shell';
+import { noteUploadProgress } from './lib/uploadStore';
 import { PortfolioView } from './views/PortfolioView';
 import { DrilldownView } from './views/DrilldownView';
 import { ComparisonsView } from './views/ComparisonsView';
@@ -43,6 +44,17 @@ const Content: React.FC<{ view: ViewId }> = ({ view }) => {
 
 const App: React.FC<ShellAppProps> = () => {
 	const [view, setView] = useState<ViewId>('upload');
+
+	// Upload progress is tracked HERE, not in UploadView, because App is
+	// always mounted while a view is not. Subscribing in UploadView meant
+	// navigating away stopped progress tracking mid-upload (and, with the
+	// state also being view-local, lost the whole submission - see
+	// lib/uploadStore.ts).
+	useShellEvent('shell:event', ({ event }) => {
+		const e = event as { event?: string; body?: { action?: string; bytes_sent?: number; file_size?: number } };
+		if (e.event !== 'apaevt_status_upload') return;
+		noteUploadProgress(e.body ?? {});
+	});
 
 	// Stable node - the shell dedupes sidebar registrations by node identity.
 	// The tagline sits below the menu (pushed down by marginTop:auto) so the

@@ -3,66 +3,36 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import React, { useCallback, useState } from 'react';
-import { Banner, Button, Card, ContentHeader, DropZone, useShellConnection, useShellEvent } from 'shell';
-import { ingestBill } from '../lib/billIngestion';
+import React, { useCallback } from 'react';
+import { Banner, Button, Card, ContentHeader, DropZone, useShellConnection } from 'shell';
 import type { IngestResult, IngestStatus } from '../lib/billIngestion';
 import billIngestionPipe from '../../../../pipelines/bill-ingestion.pipe';
+import { resetUpload, startUpload, useUploadState } from '../lib/uploadStore';
 import { FindingTypeBadge, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE } from '../lib/uiKit';
 
-type Stage = 'idle' | 'uploading' | 'processing' | 'done';
-
-interface UploadEventBody {
-	action?: string;
-	bytes_sent?: number;
-	file_size?: number;
-}
-
+/**
+ * Pure view over the app-level upload store (../lib/uploadStore.ts). This
+ * component deliberately holds NO upload state of its own: it used to, and
+ * navigating to another tab mid-upload unmounted it and silently discarded
+ * the in-flight submission. Reading from the store means a remount picks
+ * the upload back up exactly where it is - including one that finished
+ * while the user was looking at a different view.
+ */
 export const UploadView: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
-	const [stage, setStage] = useState<Stage>('idle');
-	const [progressPct, setProgressPct] = useState(0);
-	const [result, setResult] = useState<IngestResult | null>(null);
-	const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-	useShellEvent('shell:event', ({ event }) => {
-		const e = event as { event?: string; body?: UploadEventBody };
-		if (e.event !== 'apaevt_status_upload') return;
-		setStage((current) => {
-			if (current !== 'uploading') return current;
-			const { bytes_sent, file_size, action } = e.body ?? {};
-			if (file_size) setProgressPct(Math.round(((bytes_sent ?? 0) / file_size) * 100));
-			return action === 'complete' ? 'processing' : current;
-		});
-	});
+	const { stage, progressPct, result, errorMsg, fileName } = useUploadState();
 
 	const handleFiles = useCallback(
-		async (files: FileList) => {
+		(files: FileList) => {
 			if (!client) return;
 			const file = files[0];
 			if (!file) return;
-			setResult(null);
-			setErrorMsg(null);
-			setProgressPct(0);
-			setStage('uploading');
-			try {
-				const outcome = await ingestBill(client, file, billIngestionPipe);
-				setResult(outcome);
-			} catch (e) {
-				setErrorMsg(e instanceof Error ? e.message : String(e));
-			} finally {
-				setStage('done');
-			}
+			// Not awaited on purpose - the store owns this promise's lifetime,
+			// so it runs to completion whether or not this view stays mounted.
+			void startUpload(client, file, billIngestionPipe);
 		},
 		[client],
 	);
-
-	const reset = () => {
-		setStage('idle');
-		setResult(null);
-		setErrorMsg(null);
-		setProgressPct(0);
-	};
 
 	return (
 		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
@@ -79,8 +49,11 @@ export const UploadView: React.FC = () => {
 			)}
 
 			{(stage === 'uploading' || stage === 'processing') && (
-				<Card header="Processing...">
+				<Card header={fileName ? `Processing ${fileName}…` : 'Processing…'}>
 					<ProcessingIndicator stage={stage} progressPct={progressPct} />
+					<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
+						You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
+					</div>
 				</Card>
 			)}
 
@@ -88,7 +61,7 @@ export const UploadView: React.FC = () => {
 				<div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 					{errorMsg && <Banner variant="error">Unexpected error: {errorMsg}</Banner>}
 					{result && <ResultCard result={result} />}
-					<Button onClick={reset}>Upload another bill</Button>
+					<Button onClick={resetUpload}>Upload another bill</Button>
 				</div>
 			)}
 		</div>
