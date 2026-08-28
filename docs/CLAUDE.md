@@ -213,9 +213,10 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 ## Backlog / known limitations (found during build, not yet actioned)
 
 > ⚠️ **STANDING RISK — read before touching any MD/PF formula, constant,
-> the Claim.status state machine, or foundation-sql connection handling.**
+> the Claim.status state machine, the trend/what-if projection math, or
+> foundation-sql connection handling.**
 > Logic that MUST behave identically in the browser and in the dev scripts
-> exists in **three places**, each pair kept manually in sync with no
+> exists in **four places**, each pair kept manually in sync with no
 > shared source and no automated check that they agree:
 > - Recalculation math (Feature 2) —
 >   Python: `calculators/bill_line_parser.py`, `tariff_penalty_calculator.py`,
@@ -230,6 +231,11 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 >   `build_foundation_sql_pipeline`;
 >   TypeScript: `apps/poweraudit-ai-ui/src/lib/db.ts`'s `getFoundationToken`
 >   + `buildFoundationSqlPipeline`
+> - Trend detection + what-if projection (Feature 3) —
+>   Python: `calculators/history_aggregator.py`, `trend_classifier.py`,
+>   `what_if.py`;
+>   TypeScript: `apps/poweraudit-ai-ui/src/lib/trendAnalysis.ts`
+>   (parity-checked by `scripts/test-trend-parity.mts`)
 >
 > The first two exist because no RocketRide pipeline node runs arbitrary
 > deterministic Python on demand (`tool_python`'s direct-invoke path
@@ -268,8 +274,12 @@ Deploy tab → `+ Deploy` → publish to `@team`. Open `staging.rocketride.ai`, 
 > Python-computed Finding already in RocketRide SQL, for every real bill on
 > file) and `apps/poweraudit-ai-ui/scripts/test-claim-workflow-parity.mts`
 > (runs `calculators/test_calculators.py`'s `TestClaimWorkflow` cases
-> against the TypeScript port). The third pair has **no** automated parity
-> check - it's live connection-management behavior (idle-reaping is a
+> against the TypeScript port), and
+> `apps/poweraudit-ai-ui/scripts/test-trend-parity.mts` (runs
+> `TestHistoryAggregator`/`TestCDTrendClassifier`/`TestPFTrendClassifier`/
+> `TestWhatIf`'s cases against the trend port, including the hand-calculated
+> T01 breach-prediction case). The foundation-sql pair has **no** automated
+> parity check - it's live connection-management behavior (idle-reaping is a
 > server-side condition, not something a unit test can assert on cheaply),
 > so keeping `getFoundationToken`/`buildFoundationSqlPipeline` in sync with
 > `ensure_foundation_sql_token`/`build_foundation_sql_pipeline` is a manual

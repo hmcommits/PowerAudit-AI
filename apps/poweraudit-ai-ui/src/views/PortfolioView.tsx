@@ -3,11 +3,14 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import React from 'react';
-import { Banner, Button, Card, MiniCard, MiniContainer } from 'shell';
+import React, { useState } from 'react';
+import { Banner, Button, Card, MiniCard, MiniContainer, Question, useShellConnection } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
+import { scanForRisks, type ScanSummary } from '../lib/trendScan';
+import trendRecommendationPipe from '../../../../pipelines/trend-recommendation.pipe';
 import {
 	BADGE_COLORS,
+	Badge,
 	EmptyStateCard,
 	FINDING_TYPE_VARIANT,
 	FindingTypeBadge,
@@ -77,6 +80,43 @@ export const PortfolioView: React.FC = () => {
 
 	const hasData = findings.rows && alerts.rows && claims.rows;
 	const maxTypeImpact = Math.max(1, ...(typeImpact.rows ?? []).map((r) => r.total_impact));
+
+	const { client } = useShellConnection();
+	const [scanning, setScanning] = useState(false);
+	const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
+	const [scanError, setScanError] = useState<string | null>(null);
+
+	/** Feature 3, from the UI: run the same detection scan
+	 * scripts/scan_trend_alerts.py runs, across every meter, writing real
+	 * Alert rows. The CrewAI wording step is a real pipeline the browser can
+	 * call, so it's passed in here rather than reimplemented - and if it
+	 * fails (free-tier quota is the likely cause), trendScan falls back to a
+	 * deterministic description so the Alert is still written. */
+	const handleScan = async () => {
+		if (!client) return;
+		setScanning(true);
+		setScanError(null);
+		setScanSummary(null);
+		try {
+			const recToken = (await client.use({ pipeline: trendRecommendationPipe as any, source: 'chat_1', useExisting: true, ttl: 1800, name: 'trend-recommendation-app' })).token;
+			const summary = await scanForRisks(client, {
+				composeRecommendation: async (prompt: string) => {
+					const question = new Question();
+					question.addQuestion(prompt);
+					const response = await client.chat({ token: recToken, question });
+					const answers = (response as { answers?: string[] }).answers ?? [];
+					if (!answers[0]) throw new Error('no recommendation returned');
+					return answers[0];
+				},
+			});
+			setScanSummary(summary);
+			void alerts.refetch();
+		} catch (e) {
+			setScanError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setScanning(false);
+		}
+	};
 
 	return (
 		<ViewShell
@@ -165,6 +205,58 @@ export const PortfolioView: React.FC = () => {
 										</div>
 									);
 								})}
+							</div>
+						)}
+					</Card>
+
+					<Card
+						header="Predict future penalties"
+						headerActions={
+							<Button small onClick={handleScan} disabled={scanning || !client}>
+								{scanning ? 'Scanning…' : 'Scan for Risks'}
+							</Button>
+						}
+					>
+						<div style={SUBTLE_TEXT_STYLE}>
+							Everything above is money <em>already</em> lost on bills you’ve received. This looks <strong>forward</strong> instead: it fits a trend line
+							through each meter’s recent history and flags the ones heading for a penalty they haven’t incurred yet — so you can act before the bill
+							arrives, not after. Anything found is saved against that meter and explained in Site Drill-down.
+						</div>
+
+						{scanError && (
+							<div style={{ marginTop: 12 }}>
+								<Banner variant="error">Scan failed: {scanError}</Banner>
+							</div>
+						)}
+						{scanning && (
+							<div style={{ marginTop: 12 }}>
+								<LoadingState label="Fitting trend lines across every meter…" />
+							</div>
+						)}
+						{scanSummary && !scanning && (
+							<div style={{ marginTop: 12 }}>
+								<Banner variant={scanSummary.alertsWritten > 0 ? 'warning' : 'info'}>
+									Checked {scanSummary.metersScanned} meter{scanSummary.metersScanned === 1 ? '' : 's'} —{' '}
+									{scanSummary.alertsWritten > 0
+										? `${scanSummary.alertsWritten} heading toward a penalty. Open Site Drill-down for the full explanation.`
+										: 'none are currently trending toward a penalty.'}
+								</Banner>
+								{scanSummary.meters
+									.flatMap((m) => m.alerts)
+									.map((a) => (
+										<div key={a.alertId} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0' }}>
+											<Badge
+												variant={a.trendType === 'cd-breach-risk' ? 'error' : 'warning'}
+												label={a.trendType === 'cd-breach-risk' ? 'Demand breach' : 'Power factor'}
+											/>
+											<div style={{ flex: 1, minWidth: 0 }}>
+												<div style={{ fontWeight: 600 }}>
+													{a.meterId} — projected cost <MoneyValue value={a.projectedImpact} size="sm" />
+												</div>
+												<div style={SUBTLE_TEXT_STYLE}>{a.detail}</div>
+											</div>
+										</div>
+									))}
 							</div>
 						)}
 					</Card>

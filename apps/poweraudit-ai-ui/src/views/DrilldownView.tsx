@@ -9,7 +9,8 @@ import type { GridColumnDefinition, RocketRideClient } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
 import { parseLineItems } from '../lib/db';
 import { approveClaimAction } from '../lib/claimActions';
-import { Badge, ClaimStatusBadge, FindingTypeBadge, LoadingState, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE, findingTypeHtml, moneyHtml } from '../lib/uiKit';
+import { runWhatIf, type WhatIfOutcome } from '../lib/trendScan';
+import { Badge, ClaimStatusBadge, FindingTypeBadge, LoadingState, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE, Term, findingTypeHtml, moneyHtml } from '../lib/uiKit';
 
 interface MeterRow {
 	site_id: string;
@@ -192,17 +193,6 @@ export const DrilldownView: React.FC = () => {
 		[],
 	);
 
-	const alertColumns: GridColumnDefinition[] = useMemo(
-		() => [
-			{ title: 'Alert', field: 'alert_id', rrType: 'string', rrDefault: true, rrDescription: 'Alert record id.' },
-			{ title: 'Trend', field: 'trend_type', rrType: 'enum', rrDefault: true, rrDescription: 'cd-breach-risk or pf-decline-risk.' },
-			{ title: 'Projected impact', field: 'projected_impact', rrType: 'number', rrDefault: true, rrDescription: 'Estimated rupee impact if the trend continues.' },
-			{ title: 'Recommendation', field: 'recommendation', rrType: 'string', rrDefault: true, rrDescription: 'Plain-language recommendation composed by the CrewAI step.' },
-			{ title: 'Raised', field: 'created_at', rrType: 'date', rrDefault: true, rrDescription: 'When this Alert was written.' },
-		],
-		[],
-	);
-
 	const { client } = useShellConnection();
 
 	return (
@@ -272,15 +262,8 @@ export const DrilldownView: React.FC = () => {
 							retrying={findings.retrying}
 							emptyLabel="No findings for this meter."
 						/>
-						<CardDataGridSection
-							title="Alerts"
-							columns={alertColumns}
-							rows={alerts.rows}
-							error={alerts.error}
-							loading={alerts.loading}
-							retrying={alerts.retrying}
-							emptyLabel="No predictive alerts for this meter."
-						/>
+						<AlertsPanel rows={alerts.rows} error={alerts.error} loading={alerts.loading} retrying={alerts.retrying} />
+						<WhatIfPanel client={client} meterId={activeMeterId} contractDemandKva={activeMeter?.contract_demand_kva ?? null} />
 						<ClaimsPanel rows={claims.rows} error={claims.error} loading={claims.loading} retrying={claims.retrying} client={client} onApproved={() => void claims.refetch()} />
 					</div>
 				</div>
@@ -321,6 +304,202 @@ function CardDataGridSection<T extends Record<string, unknown>>(props: {
 		);
 	}
 	return <CardDataGrid tableId={`drilldown-${title.toLowerCase()}`} title={title} columns={columns} data={rows ?? []} paginate={false} noSearch />;
+}
+
+const TREND_LABEL: Record<string, { label: string; variant: 'error' | 'warning'; explain: React.ReactNode }> = {
+	'cd-breach-risk': {
+		label: 'Demand breach ahead',
+		variant: 'error',
+		explain: (
+			<>
+				This meter’s peak power draw is climbing and is on track to pass the <Term term="Contract Demand" /> it agreed with the utility. Once it does,
+				every unit above that limit is billed at a penalty rate. Acting before the crossover — raising the agreed limit, or moving load off the peak —
+				avoids the charge entirely.
+			</>
+		),
+	},
+	'pf-decline-risk': {
+		label: 'Power factor slipping',
+		variant: 'warning',
+		explain: (
+			<>
+				This meter’s <Term term="Power Factor" /> is falling toward the level where the utility starts adding a surcharge. It usually means capacitors
+				need servicing. Fixing it early keeps the surcharge off future bills.
+			</>
+		),
+	},
+};
+
+/**
+ * Alerts are FORECASTS, not charges already incurred - the panel says so
+ * explicitly, because a first-time reader has no way to tell the difference
+ * between this and the Findings table above it (which IS money already
+ * billed). Replaces the previous data-grid, whose columns gave a raw
+ * trend_type enum and truncated the recommendation text.
+ */
+function AlertsPanel(props: { rows: AlertRow[] | null; error: string | null; loading: boolean; retrying: boolean }): React.ReactElement {
+	const { rows, error, loading, retrying } = props;
+	if (error) {
+		return (
+			<Card header="Early warnings">
+				<Banner variant="error">{error}</Banner>
+			</Card>
+		);
+	}
+	if (loading && !rows) {
+		return (
+			<Card header="Early warnings">
+				<LoadingState label={retrying ? 'Reconnecting…' : 'Loading early warnings…'} />
+			</Card>
+		);
+	}
+	if (rows && rows.length === 0) {
+		return (
+			<Card header="Early warnings">
+				<EmptyState
+					title="No penalties predicted for this meter"
+					description="Nothing here means no worrying trend was detected. Use “Scan for Risks” on Portfolio Summary to check every meter — it needs at least 3 past bills to spot a trend."
+				/>
+			</Card>
+		);
+	}
+	return (
+		<Card header="Early warnings" noBodyPadding>
+			<div style={{ padding: '12px 16px 0', ...SUBTLE_TEXT_STYLE }}>
+				These are <strong>predictions, not charges you’ve been billed</strong>. Each one projects this meter’s recent trend forward to warn about a
+				penalty it hasn’t incurred yet.
+			</div>
+			<div style={{ display: 'flex', flexDirection: 'column' }}>
+				{(rows ?? []).map((alert, i) => {
+					const meta = TREND_LABEL[alert.trend_type];
+					return (
+						<div key={alert.alert_id} style={{ padding: 16, borderTop: i === 0 ? undefined : '1px solid var(--rr-border-color, rgba(128,128,128,0.2))' }}>
+							<div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+								<Badge variant={meta?.variant ?? 'muted'} label={meta?.label ?? alert.trend_type} />
+								{alert.projected_impact !== null && alert.projected_impact > 0 && (
+									<span style={SUBTLE_TEXT_STYLE}>
+										projected cost if nothing changes: <MoneyValue value={alert.projected_impact} size="sm" />
+									</span>
+								)}
+							</div>
+							{meta && <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55 }}>{meta.explain}</div>}
+							{alert.recommendation && (
+								<>
+									<div style={{ marginTop: 10, ...SECTION_LABEL_STYLE }}>What to do</div>
+									<div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.55 }}>{alert.recommendation}</div>
+								</>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</Card>
+	);
+}
+
+/**
+ * What-if: "what would raising Contract Demand to X have saved?". Runs the
+ * same projection the risk scan uses (trendAnalysis.whatIfCdChange, ported
+ * from calculators/what_if.py) and writes NOTHING - no Alert row - exactly
+ * matching scripts/what_if_scenario.py.
+ */
+function WhatIfPanel(props: { client: RocketRideClient | null; meterId: string | null; contractDemandKva: number | null }): React.ReactElement {
+	const { client, meterId, contractDemandKva } = props;
+	const [value, setValue] = useState('');
+	const [running, setRunning] = useState(false);
+	const [outcome, setOutcome] = useState<WhatIfOutcome | null>(null);
+	const [error, setError] = useState<string | null>(null);
+
+	// Reset whenever the selected meter changes - a projection for the
+	// previously-selected meter must never linger under a new one's header.
+	const [lastMeter, setLastMeter] = useState<string | null>(meterId);
+	if (lastMeter !== meterId) {
+		setLastMeter(meterId);
+		setOutcome(null);
+		setError(null);
+		setValue('');
+	}
+
+	const hypothetical = Number(value);
+	const canRun = !!client && !!meterId && Number.isFinite(hypothetical) && hypothetical > 0 && !running;
+
+	const run = async () => {
+		if (!client || !meterId) return;
+		setRunning(true);
+		setError(null);
+		setOutcome(null);
+		try {
+			setOutcome(await runWhatIf(client, meterId, hypothetical));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setRunning(false);
+		}
+	};
+
+	const r = outcome?.result;
+	return (
+		<Card header="What if we raised the agreed limit?">
+			<div style={SUBTLE_TEXT_STYLE}>
+				Try a different <Term term="Contract Demand" /> and see what it would cost or save. This only does the sums — it changes nothing and saves
+				nothing.
+				{contractDemandKva !== null && <> This meter’s current agreed limit is <strong>{contractDemandKva} kVA</strong>.</>}
+			</div>
+			<div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+				<InputField
+					type="number"
+					placeholder="New limit in kVA, e.g. 560"
+					value={value}
+					onChange={(e) => setValue(e.target.value)}
+					disabled={running}
+					style={{ minWidth: 220 }}
+				/>
+				<Button small disabled={!canRun} onClick={run}>
+					{running ? 'Calculating…' : 'Project cost'}
+				</Button>
+			</div>
+
+			{error && (
+				<div style={{ marginTop: 12 }}>
+					<Banner variant="error">{error}</Banner>
+				</div>
+			)}
+
+			{r && r.status === 'insufficient_data' && (
+				<div style={{ marginTop: 12 }}>
+					<Banner variant="info">This meter needs at least 3 past bills before a trend can be projected. It doesn’t have enough history yet.</Banner>
+				</div>
+			)}
+
+			{r && r.status === 'ok' && (
+				<div style={{ marginTop: 12 }}>
+					<div style={SUBTLE_TEXT_STYLE}>
+						Based on the recent trend, peak demand is projected to reach <strong>{r.projected_md_at_horizon} kVA</strong> in{' '}
+						{r.warning_horizon_months} months.
+					</div>
+					<div style={{ marginTop: 10, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+						<div>
+							<div style={SUBTLE_TEXT_STYLE}>Penalty at current {r.current_cd} kVA</div>
+							<MoneyValue value={r.current_projected_penalty} size="lg" />
+						</div>
+						<div>
+							<div style={SUBTLE_TEXT_STYLE}>Penalty at {r.hypothetical_cd} kVA</div>
+							<MoneyValue value={r.hypothetical_projected_penalty} size="lg" />
+						</div>
+						<div>
+							<div style={SUBTLE_TEXT_STYLE}>Difference</div>
+							<MoneyValue value={r.projected_savings} size="lg" />
+						</div>
+					</div>
+					<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
+						{(r.projected_savings ?? 0) > 0
+							? `Raising the limit to ${r.hypothetical_cd} kVA would avoid about ${(r.projected_savings ?? 0).toLocaleString('en-IN')} rupees of penalty on the projected demand. Weigh that against any higher standing charge for the larger limit.`
+							: 'That change would not reduce the projected penalty — the trend does not cross the limit either way.'}
+					</div>
+				</div>
+			)}
+		</Card>
+	);
 }
 
 /**
