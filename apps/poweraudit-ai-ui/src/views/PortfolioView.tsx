@@ -4,9 +4,20 @@
 // =============================================================================
 
 import React from 'react';
-import { Banner, Button, Card, ContentHeader, EmptyState, MiniCard, MiniContainer } from 'shell';
+import { Banner, Button, Card, MiniCard, MiniContainer } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
-import { BADGE_COLORS, FINDING_TYPE_VARIANT, FindingTypeBadge, LoadingState, MoneyValue, SUBTLE_TEXT_STYLE } from '../lib/uiKit';
+import {
+	BADGE_COLORS,
+	EmptyStateCard,
+	FINDING_TYPE_VARIANT,
+	FindingTypeBadge,
+	InfoTip,
+	LoadingState,
+	MoneyValue,
+	SUBTLE_TEXT_STYLE,
+	Term,
+	ViewShell,
+} from '../lib/uiKit';
 
 // "Open" Finding: no Claim yet, or its Claim hasn't reached a terminal
 // state (credited/denied) - Section 3 gives Finding no status field of its
@@ -68,19 +79,29 @@ export const PortfolioView: React.FC = () => {
 	const maxTypeImpact = Math.max(1, ...(typeImpact.rows ?? []).map((r) => r.total_impact));
 
 	return (
-		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-			<ContentHeader
-				title="Portfolio Summary"
-				subtitle="Open Findings, active Alerts, and Claims in progress across every site and meter currently in RocketRide SQL."
-				actions={
-					<Button variant="secondary" small onClick={refreshAll}>
-						Refresh
-					</Button>
-				}
-			/>
+		<ViewShell
+			title="Portfolio Summary"
+			subtitle="The headline number: how much money this portfolio appears to have been overcharged."
+			actions={
+				<Button variant="secondary" small onClick={refreshAll}>
+					Refresh
+				</Button>
+			}
+			intro={
+				<>
+					Electricity utilities charge commercial sites penalties when they draw more power than they agreed to (<Term term="MD penalty" />) or use it
+					inefficiently (<Term term="PF penalty" />). Those charges are often wrong. PowerAudit AI re-checks every bill against the utility’s own tariff
+					rules and totals up what looks recoverable. <strong>This page is the portfolio-wide summary</strong> — the total across all sites, and which kind
+					of penalty is costing the most.
+				</>
+			}
+		>
 			{error && <Banner variant="error">{error}</Banner>}
 			{!error && !hasData && !loading && (
-				<EmptyState title="No data yet" description="Run scripts/ingest_bills.py and scripts/recalculate_bills.py to populate RocketRide SQL." />
+				<EmptyStateCard
+					title="No bills audited yet"
+					description="Once electricity bills are uploaded, this page will show how much money looks recoverable across every site. Use the Upload Bill tab to add one."
+				/>
 			)}
 			{!error && (hasData || loading) && (
 				<>
@@ -91,7 +112,10 @@ export const PortfolioView: React.FC = () => {
 					<Card>
 						<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap' }}>
 							<div>
-								<div style={SUBTLE_TEXT_STYLE}>Total disputed impact</div>
+								<div style={SUBTLE_TEXT_STYLE}>
+									Money potentially recoverable
+									<InfoTip text="The total rupee value of billing errors found so far - money these sites appear to have been overcharged and could claim back from their utility." />
+								</div>
 								<div style={{ marginTop: 4 }}>
 									{loading && !findings.rows ? (
 										<span style={{ fontSize: 32, fontWeight: 700, color: 'var(--rr-text-secondary)' }}>{retrying ? 'Reconnecting…' : '…'}</span>
@@ -99,19 +123,25 @@ export const PortfolioView: React.FC = () => {
 										<MoneyValue value={findings.rows?.[0]?.total_impact ?? 0} size="xl" />
 									)}
 								</div>
-								<div style={{ marginTop: 4, ...SUBTLE_TEXT_STYLE }}>across {loading && !findings.rows ? '…' : findings.rows?.[0]?.n ?? 0} open finding(s)</div>
+								<div style={{ marginTop: 4, ...SUBTLE_TEXT_STYLE }}>
+									found across {loading && !findings.rows ? '…' : findings.rows?.[0]?.n ?? 0} billing error(s) not yet resolved
+								</div>
 							</div>
 							<MiniContainer columns={2}>
-								<MiniCard value={loading && !alerts.rows ? '…' : String(alerts.rows?.[0]?.n ?? 0)} label="Active Alerts" />
-								<MiniCard value={loading && !claims.rows ? '…' : String(claims.rows?.[0]?.n ?? 0)} label="Claims in progress" color="var(--rr-color-info)" />
+								<MiniCard value={loading && !alerts.rows ? '…' : String(alerts.rows?.[0]?.n ?? 0)} label="Early warnings" />
+								<MiniCard value={loading && !claims.rows ? '…' : String(claims.rows?.[0]?.n ?? 0)} label="Refund claims open" color="var(--rr-color-info)" />
 							</MiniContainer>
 						</div>
 					</Card>
 
-					<Card header="Disputed impact by finding type">
+					<Card header="Where the money is going">
+						<div style={{ marginBottom: 12, ...SUBTLE_TEXT_STYLE }}>
+							Which kind of billing error accounts for the most money. <Term term="MD penalty" /> is charged for drawing too much power at once;{' '}
+							<Term term="PF penalty" /> for using power inefficiently; <Term term="Math error" /> means the bill’s own numbers don’t add up.
+						</div>
 						{typeImpact.error && <Banner variant="error">{typeImpact.error}</Banner>}
 						{!typeImpact.error && typeImpact.loading && !typeImpact.rows && (
-							<LoadingState label={typeImpact.retrying ? 'Reconnecting…' : 'Loading breakdown…'} />
+							<LoadingState label={typeImpact.retrying ? 'Reconnecting…' : 'Adding up penalties by type…'} />
 						)}
 						{!typeImpact.error && typeImpact.rows && (
 							<div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -129,8 +159,8 @@ export const PortfolioView: React.FC = () => {
 											<div style={{ width: 110, textAlign: 'right' }}>
 												<MoneyValue value={row.total_impact} size="sm" />
 											</div>
-											<div style={{ width: 90, textAlign: 'right', ...SUBTLE_TEXT_STYLE }}>
-												{row.n} finding{row.n === 1 ? '' : 's'}
+											<div style={{ width: 100, textAlign: 'right', ...SUBTLE_TEXT_STYLE }}>
+												on {row.n} bill{row.n === 1 ? '' : 's'}
 											</div>
 										</div>
 									);
@@ -140,6 +170,6 @@ export const PortfolioView: React.FC = () => {
 					</Card>
 				</>
 			)}
-		</div>
+		</ViewShell>
 	);
 };

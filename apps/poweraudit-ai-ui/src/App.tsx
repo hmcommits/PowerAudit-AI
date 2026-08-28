@@ -21,6 +21,7 @@ import { PortfolioView } from './views/PortfolioView';
 import { DrilldownView } from './views/DrilldownView';
 import { ComparisonsView } from './views/ComparisonsView';
 import { UploadView } from './views/UploadView';
+import { PRODUCT_TAGLINE } from './lib/uiKit';
 
 type ViewId = 'upload' | 'portfolio' | 'drilldown' | 'comparisons';
 
@@ -44,8 +45,16 @@ const App: React.FC<ShellAppProps> = () => {
 	const [view, setView] = useState<ViewId>('upload');
 
 	// Stable node - the shell dedupes sidebar registrations by node identity.
+	// The tagline sits below the menu (pushed down by marginTop:auto) so the
+	// "what is this product?" answer is on screen in every view, not just on
+	// whichever one the user happens to open first.
 	const sidebar = useMemo(
-		() => <SidebarMenu menu={MENU} activeId={view} onSelect={(id) => setView(id as ViewId)} sectionLabel="PowerAudit AI" />,
+		() => (
+			<div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+				<SidebarMenu menu={MENU} activeId={view} onSelect={(id) => setView(id as ViewId)} sectionLabel="PowerAudit AI" />
+				<div style={{ marginTop: 'auto', padding: '12px 12px 4px', fontSize: 11, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>{PRODUCT_TAGLINE}</div>
+			</div>
+		),
 		[view],
 	);
 
