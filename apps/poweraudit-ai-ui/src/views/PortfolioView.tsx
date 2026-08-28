@@ -3,10 +3,10 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Banner, Button, Card, MiniCard, MiniContainer, Question, useShellConnection } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
-import { scanForRisks, type ScanSummary } from '../lib/trendScan';
+import { startScan, useScanState } from '../lib/trendScanStore';
 import trendRecommendationPipe from '../../../../pipelines/trend-recommendation.pipe';
 import {
 	BADGE_COLORS,
@@ -82,9 +82,13 @@ export const PortfolioView: React.FC = () => {
 	const maxTypeImpact = Math.max(1, ...(typeImpact.rows ?? []).map((r) => r.total_impact));
 
 	const { client } = useShellConnection();
-	const [scanning, setScanning] = useState(false);
-	const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
-	const [scanError, setScanError] = useState<string | null>(null);
+	// Scan state lives in an app-level store, NOT this component. A scan is a
+	// long, multi-request operation; holding its state here would mean
+	// navigating away mid-scan discards it (the upload bug) and a dropped
+	// connection hangs the button forever (the "Uploading 100%" bug). See
+	// lib/trendScanStore.ts.
+	const { stage: scanStage, summary: scanSummary, errorMsg: scanError, slow: scanSlow } = useScanState();
+	const scanning = scanStage === 'scanning';
 
 	/** Feature 3, from the UI: run the same detection scan
 	 * scripts/scan_trend_alerts.py runs, across every meter, writing real
@@ -92,30 +96,23 @@ export const PortfolioView: React.FC = () => {
 	 * call, so it's passed in here rather than reimplemented - and if it
 	 * fails (free-tier quota is the likely cause), trendScan falls back to a
 	 * deterministic description so the Alert is still written. */
-	const handleScan = async () => {
+	const handleScan = () => {
 		if (!client) return;
-		setScanning(true);
-		setScanError(null);
-		setScanSummary(null);
-		try {
-			const recToken = (await client.use({ pipeline: trendRecommendationPipe as any, source: 'chat_1', useExisting: true, ttl: 1800, name: 'trend-recommendation-app' })).token;
-			const summary = await scanForRisks(client, {
-				composeRecommendation: async (prompt: string) => {
-					const question = new Question();
-					question.addQuestion(prompt);
-					const response = await client.chat({ token: recToken, question });
-					const answers = (response as { answers?: string[] }).answers ?? [];
-					if (!answers[0]) throw new Error('no recommendation returned');
-					return answers[0];
-				},
-			});
-			setScanSummary(summary);
+		// Not awaited on purpose - the store owns this promise's lifetime, so
+		// it runs to completion whether or not this view stays mounted.
+		void startScan(client, {
+			composeRecommendation: async (prompt: string) => {
+				const recToken = (await client.use({ pipeline: trendRecommendationPipe as any, source: 'chat_1', useExisting: true, ttl: 1800, name: 'trend-recommendation-app' })).token;
+				const question = new Question();
+				question.addQuestion(prompt);
+				const response = await client.chat({ token: recToken, question });
+				const answers = (response as { answers?: string[] }).answers ?? [];
+				if (!answers[0]) throw new Error('no recommendation returned');
+				return answers[0];
+			},
+		}).then(() => {
 			void alerts.refetch();
-		} catch (e) {
-			setScanError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setScanning(false);
-		}
+		});
 	};
 
 	return (
@@ -231,6 +228,14 @@ export const PortfolioView: React.FC = () => {
 						{scanning && (
 							<div style={{ marginTop: 12 }}>
 								<LoadingState label="Fitting trend lines across every meter…" />
+								{scanSlow && (
+									<div style={{ marginTop: 10 }}>
+										<Banner variant="warning">
+											This is taking longer than usual. A scan checks every meter one at a time, so it may still finish — and you can switch to
+											another tab meanwhile; it keeps running and the result will be here when you return.
+										</Banner>
+									</div>
+								)}
 							</div>
 						)}
 						{scanSummary && !scanning && (
