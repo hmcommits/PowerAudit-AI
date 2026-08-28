@@ -20,7 +20,7 @@ import { FindingTypeBadge, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE } 
  */
 export const UploadView: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
-	const { stage, progressPct, result, errorMsg, fileName } = useUploadState();
+	const { stage, progressPct, result, errorMsg, fileName, slow } = useUploadState();
 
 	const handleFiles = useCallback(
 		(files: FileList) => {
@@ -54,6 +54,14 @@ export const UploadView: React.FC = () => {
 					<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
 						You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
 					</div>
+					{slow && (
+						<div style={{ marginTop: 12 }}>
+							<Banner variant="warning">
+								This is taking longer than usual. Reading a bill normally finishes in about two minutes — it may still complete on its own. If it
+								doesn’t, you’ll get a clear message rather than an endless spinner, and re-uploading the same file is always safe.
+							</Banner>
+						</div>
+					)}
 				</Card>
 			)}
 
@@ -97,6 +105,7 @@ const STATUS_TITLE: Record<IngestStatus, string> = {
 	NEEDS_REVIEW: 'Ingested - flagged for review',
 	REJECTED: "Rejected - couldn't ingest",
 	ERROR: 'Pipeline error',
+	TIMEOUT: "No response from the server - here's exactly where that leaves you",
 };
 
 const STATUS_VARIANT: Record<IngestStatus, 'info' | 'warning' | 'error'> = {
@@ -104,6 +113,7 @@ const STATUS_VARIANT: Record<IngestStatus, 'info' | 'warning' | 'error'> = {
 	NEEDS_REVIEW: 'warning',
 	REJECTED: 'error',
 	ERROR: 'error',
+	TIMEOUT: 'warning',
 };
 
 function ResultCard({ result }: { result: IngestResult }): React.ReactElement {

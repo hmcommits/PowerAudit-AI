@@ -37,7 +37,54 @@ interface ValidationBlock {
 	reason?: string;
 }
 
-export type IngestStatus = 'OK' | 'NEEDS_REVIEW' | 'REJECTED' | 'ERROR';
+export type IngestStatus = 'OK' | 'NEEDS_REVIEW' | 'REJECTED' | 'ERROR' | 'TIMEOUT';
+
+/**
+ * How long to wait for the server to return an extraction result before
+ * giving up. The SDK imposes NO timeout of its own - ROCKETRIDE_typescript_API.md
+ * documents `requestTimeout` as "default per-request timeout in ms
+ * (default: none)" - so a sendFiles() whose response never arrives (e.g. the
+ * WebSocket dropped during the ~2 minutes of OCR + LLM work) leaves an
+ * un-settled promise that hangs FOREVER. That is exactly what produced the
+ * reported "Uploading 100%" stuck for 30+ minutes while Server Monitor
+ * showed the task completed in 1m59s.
+ *
+ * SIZED FROM MEASUREMENT, NOT GUESSWORK. An initial 180s felt generous
+ * against the 1m59s the reported run took server-side - but a real upload
+ * measured by scripts/test-upload-completion.mts took 175.9s end to end,
+ * i.e. it would have been aborted with 4 seconds to spare. Free-tier Gemini
+ * latency varies a lot and extract_facts' validate=true pass roughly
+ * doubles the LLM calls, so the spread between a fast and a slow legitimate
+ * run is wide. 300s sits far enough above the observed worst case to never
+ * kill live work, while still catching a genuinely lost response in five
+ * minutes instead of the 30+ minutes users actually sat through. The 90s
+ * slow-warning (uploadStore.SLOW_WARNING_MS) is what keeps the user informed
+ * in the meantime - the timeout is a backstop, not the feedback mechanism.
+ */
+export const SEND_TIMEOUT_MS = 300_000;
+
+export class UploadTimeoutError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'UploadTimeoutError';
+	}
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new UploadTimeoutError(message)), ms);
+		promise.then(
+			(v) => {
+				clearTimeout(timer);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(timer);
+				reject(e);
+			},
+		);
+	});
+}
 
 export interface IngestResult {
 	status: IngestStatus;
@@ -222,14 +269,52 @@ function sanitizeBillId(fileName: string): string {
  * JSON - the caller imports it (see UploadView.tsx) so this module stays
  * bundler-agnostic (see ensureBillIngestionToken's docstring).
  */
-export async function ingestBill(client: RocketRideClient, file: File, pipeline: Record<string, unknown>): Promise<IngestResult> {
+export async function ingestBill(
+	client: RocketRideClient,
+	file: File,
+	pipeline: Record<string, unknown>,
+	opts?: { sendTimeoutMs?: number },
+): Promise<IngestResult> {
 	const sqlToken = await getFoundationToken(client);
 	if (!sqlToken) {
 		return { status: 'ERROR', fileName: file.name, reasons: ['foundation-sql pipeline is not running (no task token resolved)'] };
 	}
 
+	// Computed up-front (not after the meter lookup as before) so the
+	// timeout path below can definitively check whether this bill exists.
+	const billId = sanitizeBillId(file.name);
 	const billToken = await ensureBillIngestionToken(client, pipeline);
-	const results = await client.sendFiles([{ file }], billToken);
+
+	let results: unknown[];
+	try {
+		results = await withTimeout(
+			client.sendFiles([{ file }], billToken),
+			opts?.sendTimeoutMs ?? SEND_TIMEOUT_MS,
+			'no response from the server within the timeout',
+		);
+	} catch (e) {
+		if (!(e instanceof UploadTimeoutError)) throw e;
+		// The SQL writes below are performed BY THIS CLIENT after extraction
+		// returns - so a lost response means they were never attempted, not
+		// that they failed. Check the database directly rather than guessing,
+		// so the user is told definitively whether anything was saved.
+		const existing = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [billId]);
+		const landed = existing.length > 0;
+		return {
+			status: 'TIMEOUT',
+			fileName: file.name,
+			billId: landed ? billId : undefined,
+			reasons: landed
+				? [
+						'The server did not respond in time, but a bill with this filename IS on record - it may be from an earlier upload of the same file. Check Site Drill-down to confirm the figures are the ones you expected.',
+					]
+				: [
+						'The server did not respond in time, and nothing was saved for this file.',
+						'The extraction may still have completed server-side, but its result never reached this browser - so the bill could not be written. Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.',
+					],
+		};
+	}
+
 	const entry = results[0] as { action?: string; result?: Record<string, unknown>; error?: unknown };
 
 	const { fields, validation, error } = extractFields(entry);
@@ -258,7 +343,6 @@ export async function ingestBill(client: RocketRideClient, file: File, pipeline:
 		return { status: 'REJECTED', fileName: file.name, reasons: [`unknown meter_number '${meterNumber}' (no matching Meter record)`, ...reasons] };
 	}
 
-	const billId = sanitizeBillId(file.name);
 	const recordedMd = toNumber(fields!.recorded_md);
 	const recordedPf = toNumber(fields!.recorded_pf);
 	const totalDue = toNumber(fields!.total_due);

@@ -44,9 +44,18 @@ export interface UploadState {
 	/** Name of the file currently being processed - lets a remounted view
 	 * say WHICH bill is in flight, not just that something is. */
 	fileName: string | null;
+	/** Set once an upload has been running longer than SLOW_WARNING_MS, so
+	 * the UI can say "this is unusual" instead of showing an unexplained
+	 * spinner. Typical server-side work is ~2 minutes; a run that passes
+	 * this mark is worth flagging but is NOT yet a failure. */
+	slow: boolean;
 }
 
-const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null };
+/** Warn (don't fail) after 90s - comfortably past a normal ~2 minute run's
+ * halfway point, and well before billIngestion's 180s hard timeout. */
+export const SLOW_WARNING_MS = 90_000;
+
+const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null, slow: false };
 
 let state: UploadState = INITIAL;
 let inFlight = false;
@@ -97,16 +106,30 @@ export function noteUploadProgress(body: { action?: string; bytes_sent?: number;
  * Guarded against concurrent uploads - the UI only offers one at a time,
  * and a second overlapping run would interleave progress events.
  */
-export async function startUpload(client: RocketRideClient, file: File, pipeline: Record<string, unknown>): Promise<void> {
+export async function startUpload(
+	client: RocketRideClient,
+	file: File,
+	pipeline: Record<string, unknown>,
+	opts?: { sendTimeoutMs?: number },
+): Promise<void> {
 	if (inFlight) return;
 	inFlight = true;
-	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name });
+	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false });
+
+	// Watchdog: the UI must never sit on a silent spinner. This only
+	// ANNOUNCES slowness; billIngestion's own timeout is what actually
+	// resolves a lost response.
+	const slowTimer = setTimeout(() => {
+		if (inFlight) setState({ slow: true });
+	}, SLOW_WARNING_MS);
+
 	try {
-		const outcome = await ingestBill(client, file, pipeline);
-		setState({ result: outcome, errorMsg: null, stage: 'done' });
+		const outcome = await ingestBill(client, file, pipeline, opts);
+		setState({ result: outcome, errorMsg: null, stage: 'done', slow: false });
 	} catch (e) {
-		setState({ result: null, errorMsg: e instanceof Error ? e.message : String(e), stage: 'done' });
+		setState({ result: null, errorMsg: e instanceof Error ? e.message : String(e), stage: 'done', slow: false });
 	} finally {
+		clearTimeout(slowTimer);
 		inFlight = false;
 	}
 }
