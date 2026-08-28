@@ -144,12 +144,13 @@ export const ComparisonsView: React.FC = () => {
 						<div style={{ marginBottom: 12, ...SUBTLE_TEXT_STYLE }}>
 							{METRIC_LABEL[metric]}, worst first — {ranked.length} meters
 						</div>
-						{/* Capped with its own scroll: with 15 meters this list is
-						    taller than the viewport, which pushed the "All meters"
-						    table below it out of reach and made the chart itself
-						    look like it wasn't rendering. Bounding it here means
-						    both are always reachable. */}
-						<div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+						{/* Every meter visible at once - no inner scroll. The rows
+						    are deliberately compact (18px bars, 6px gaps) so all 15
+						    fit without one; the page's own scroller reaches the
+						    table below. An earlier version capped this at 340px,
+						    which meant scrolling inside the chart to see the worst
+						    offenders - the opposite of what a ranking is for. */}
+						<div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
 							{ranked.map((row, idx) => {
 								const value = metricValue(row, metric);
 								const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, value > 0 ? 2 : 0) : 0;
@@ -157,14 +158,14 @@ export const ComparisonsView: React.FC = () => {
 								const isMoney = metric !== 'penalty_count';
 								return (
 									<div key={row.meter_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-										<div style={{ width: 64, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+										<div style={{ width: 74, fontWeight: 600, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
 											#{idx + 1} {row.meter_id}
 										</div>
-										<div style={{ flex: 1, background: 'var(--rr-surface-secondary, rgba(128,128,128,0.15))', borderRadius: 4, height: 22, overflow: 'hidden' }}>
+										<div style={{ flex: 1, background: 'var(--rr-surface-secondary, rgba(128,128,128,0.15))', borderRadius: 4, height: 18, overflow: 'hidden' }}>
 											<div style={{ width: `${pct}%`, background: color, height: '100%', transition: 'width 200ms ease' }} />
 										</div>
-										<div style={{ width: 140, textAlign: 'right' }}>
-											{isMoney ? <MoneyValue value={value} size="md" /> : (
+										<div style={{ width: 120, textAlign: 'right' }}>
+											{isMoney ? <MoneyValue value={value} size="sm" /> : (
 												<span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
 											)}
 										</div>
@@ -173,7 +174,11 @@ export const ComparisonsView: React.FC = () => {
 							})}
 						</div>
 					</Card>
-					<CardDataGrid tableId="comparisons" title="All meters" columns={columns} data={gridData} paginate={false} noSearch />
+					{/* Bounded so the full table is always reachable and scrolls
+					    within itself, rather than running off the bottom. */}
+					<div style={{ maxHeight: 420, overflowY: 'auto' }}>
+						<CardDataGrid tableId="comparisons" title="All meters" columns={columns} data={gridData} paginate={false} noSearch />
+					</div>
 				</>
 			)}
 		</ViewShell>

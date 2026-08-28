@@ -196,18 +196,19 @@ export const DrilldownView: React.FC = () => {
 	const { client } = useShellConnection();
 
 	return (
-		// scrollBody={false}: this view manages its own two independently
-		// scrolling columns, so ViewShell must NOT wrap them in a third
-		// scroller. Converting to ViewShell is the actual fix for the
-		// Alerts/What-If/Claims sections not scrolling: the hand-rolled root
-		// this replaced set height:100% but no minHeight:0, so the root
-		// refused to shrink below its content and the right column's
-		// overflowY:auto never engaged - the broken link was the ROOT, not
-		// the section divs.
+		// Uses ViewShell's DEFAULT scrolling body - the same mode Portfolio
+		// and Comparisons use and which demonstrably scrolls. Two previous
+		// attempts here relied on a chain of flex:1 + minHeight:0 + height:100%
+		// resolving against a definite height from the shell's client area;
+		// both failed in the browser, so that assumption is wrong and this
+		// view no longer depends on it. Everything below sizes to CONTENT and
+		// the one ViewShell scroller reaches all of it. The cost is that the
+		// meter list no longer scrolls independently of the detail panel -
+		// it gets its own bounded scroll instead, which works without needing
+		// any ancestor to supply a height.
 		<ViewShell
 			title="Site Drill-down"
 			subtitle="One meter's full story: what it was billed, what we found, what's coming, and what's being claimed back."
-			scrollBody={false}
 			actions={
 				<Button variant="secondary" small onClick={refreshAll}>
 					Refresh
@@ -220,10 +221,10 @@ export const DrilldownView: React.FC = () => {
 				<EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py to populate RocketRide SQL." />
 			)}
 			{!meters.error && meters.rows && meters.rows.length > 0 && (
-				<div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-					<div style={{ width: 260, flexShrink: 0, minHeight: 0, display: 'flex' }}>
-						<Card header="Meters" noBodyPadding fill>
-						<div style={{ overflowY: 'auto', height: '100%' }}>
+				<div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+					<div style={{ width: 260, flexShrink: 0 }}>
+						<Card header="Meters" noBodyPadding>
+						<div style={{ maxHeight: 460, overflowY: 'auto' }}>
 							{Object.entries(
 								meters.rows.reduce<Record<string, MeterRow[]>>((acc, m) => {
 									(acc[m.site_name] ??= []).push(m);
@@ -255,7 +256,7 @@ export const DrilldownView: React.FC = () => {
 						</Card>
 					</div>
 
-					<div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+					<div style={{ flex: '1 1 480px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
 						{activeMeter && (
 							<Banner variant="info">
 								{activeMeter.meter_id} — {activeMeter.discom}, {activeMeter.tariff_category}, Contract Demand {activeMeter.contract_demand_kva} kVA, site{' '}
