@@ -17,7 +17,7 @@
 import React, { useMemo, useState } from 'react';
 import type { ShellAppProps } from 'shell';
 import { AppLayout, SidebarMenu, useShellEvent } from 'shell';
-import { noteUploadProgress } from './lib/uploadStore';
+import { noteTaskEvent, noteUploadProgress } from './lib/uploadStore';
 import { PortfolioView } from './views/PortfolioView';
 import { DrilldownView } from './views/DrilldownView';
 import { ComparisonsView } from './views/ComparisonsView';
@@ -51,9 +51,21 @@ const App: React.FC<ShellAppProps> = () => {
 	// state also being view-local, lost the whole submission - see
 	// lib/uploadStore.ts).
 	useShellEvent('shell:event', ({ event }) => {
-		const e = event as { event?: string; body?: { action?: string; bytes_sent?: number; file_size?: number } };
-		if (e.event !== 'apaevt_status_upload') return;
-		noteUploadProgress(e.body ?? {});
+		const e = event as { event?: string; body?: Record<string, unknown> };
+		// apaevt_status_upload drives the byte-progress bar.
+		if (e.event === 'apaevt_status_upload') {
+			noteUploadProgress((e.body ?? {}) as { action?: string; bytes_sent?: number; file_size?: number });
+			return;
+		}
+		// apaevt_task carries the task lifecycle, including the "end" that
+		// says the server finished. This branch did not exist: the handler
+		// early-returned on anything that wasn't apaevt_status_upload, so a
+		// captured `{"action":"end","name":"bill-ingestion-app.dropper_1"}`
+		// reached the browser and was discarded, leaving the UI on
+		// "Uploading 100%" indefinitely.
+		if (e.event === 'apaevt_task') {
+			noteTaskEvent((e.body ?? {}) as { action?: string; name?: string; source?: string });
+		}
 	});
 
 	// Stable node - the shell dedupes sidebar registrations by node identity.

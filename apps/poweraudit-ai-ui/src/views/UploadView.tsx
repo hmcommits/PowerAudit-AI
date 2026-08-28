@@ -20,7 +20,7 @@ import { FindingTypeBadge, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE } 
  */
 export const UploadView: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
-	const { stage, progressPct, result, errorMsg, fileName, slow } = useUploadState();
+	const { stage, progressPct, result, errorMsg, fileName, slow, serverFinished } = useUploadState();
 
 	const handleFiles = useCallback(
 		(files: FileList) => {
@@ -54,7 +54,12 @@ export const UploadView: React.FC = () => {
 					<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
 						You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
 					</div>
-					{slow && (
+					{serverFinished && (
+						<div style={{ marginTop: 12 }}>
+							<Banner variant="info">The server has finished reading this bill and the result is on its way.</Banner>
+						</div>
+					)}
+					{slow && !serverFinished && (
 						<div style={{ marginTop: 12 }}>
 							<Banner variant="warning">
 								This is taking longer than usual. Reading a bill normally finishes in about two minutes — it may still complete on its own. If it

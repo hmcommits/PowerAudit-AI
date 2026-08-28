@@ -32,7 +32,7 @@
 
 import { useSyncExternalStore } from 'react';
 import type { RocketRideClient } from 'shell';
-import { ingestBill, type IngestResult } from './billIngestion';
+import { BILL_INGESTION_SOURCE, ingestBill, UploadTimeoutError, type IngestResult } from './billIngestion';
 
 export type UploadStage = 'idle' | 'uploading' | 'processing' | 'done';
 
@@ -49,13 +49,18 @@ export interface UploadState {
 	 * spinner. Typical server-side work is ~2 minutes; a run that passes
 	 * this mark is worth flagging but is NOT yet a failure. */
 	slow: boolean;
+	/** Set when the server has reported this task finished (apaevt_task
+	 * "end") while we are still waiting for its response - lets the UI say
+	 * "the server finished, collecting the result" instead of a bare
+	 * spinner, and is the signal the lost-response detector runs on. */
+	serverFinished: boolean;
 }
 
 /** Warn (don't fail) after 90s - comfortably past a normal ~2 minute run's
  * halfway point, and well before billIngestion's 180s hard timeout. */
 export const SLOW_WARNING_MS = 90_000;
 
-const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null, slow: false };
+const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null, slow: false, serverFinished: false };
 
 let state: UploadState = INITIAL;
 let inFlight = false;
@@ -85,6 +90,50 @@ export function isUploadInFlight(): boolean {
 }
 
 /**
+ * How long to keep waiting for sendFiles' response AFTER the server has
+ * told us, via an `apaevt_task` `end` event, that the task is finished.
+ * Once the task has ended the answer should arrive essentially at once; if
+ * it hasn't within this window it is not coming, and continuing to wait for
+ * the 300s hard timeout just prolongs a spinner we already know is doomed.
+ */
+export const TASK_END_GRACE_MS = 20_000;
+
+let onLostAfterTaskEnd: (() => void) | null = null;
+let taskEndTimer: ReturnType<typeof setTimeout> | null = null;
+/** Grace window for the CURRENT upload - overridable per call so a test can
+ * force the lost-response path deterministically instead of racing a real
+ * upload that might legitimately finish inside the default window. */
+let currentGraceMs: number = 20_000;
+
+/**
+ * Consume an `apaevt_task` event.
+ *
+ * THIS IS THE WIRE THAT WAS MISSING. A captured console log showed
+ * `apaevt_task {"action":"end","name":"bill-ingestion-app.dropper_1"}`
+ * firing 1m53s into an upload - the task genuinely finished - followed by
+ * 8+ minutes of nothing, because App.tsx's only shell-event subscriber
+ * early-returned on any event that wasn't `apaevt_status_upload`. The
+ * completion signal arrived at the browser and was dropped on the floor,
+ * so the UI sat on "Uploading 100%" indefinitely.
+ *
+ * Matching on `source` rather than the display `name` because the name is
+ * built as `${use().name}.${source}` and would silently stop matching if
+ * anyone renamed the task; the source id is structural.
+ */
+export function noteTaskEvent(body: { action?: string; name?: string; source?: string }): void {
+	if (!inFlight) return;
+	if (body.action !== 'end') return;
+	if (body.source !== BILL_INGESTION_SOURCE) return;
+
+	setState({ serverFinished: true });
+	if (taskEndTimer === null) {
+		taskEndTimer = setTimeout(() => {
+			if (inFlight) onLostAfterTaskEnd?.();
+		}, currentGraceMs);
+	}
+}
+
+/**
  * Fold an `apaevt_status_upload` shell event into upload progress. Called
  * from App.tsx (which is always mounted) rather than from UploadView, so
  * progress keeps tracking correctly even while the user is on another tab.
@@ -110,26 +159,59 @@ export async function startUpload(
 	client: RocketRideClient,
 	file: File,
 	pipeline: Record<string, unknown>,
-	opts?: { sendTimeoutMs?: number },
+	opts?: { sendTimeoutMs?: number; taskEndGraceMs?: number },
 ): Promise<void> {
 	if (inFlight) return;
 	inFlight = true;
-	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false });
+	currentGraceMs = opts?.taskEndGraceMs ?? TASK_END_GRACE_MS;
+	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false, serverFinished: false });
 
 	// Watchdog: the UI must never sit on a silent spinner. This only
-	// ANNOUNCES slowness; billIngestion's own timeout is what actually
-	// resolves a lost response.
+	// ANNOUNCES slowness; the two mechanisms below actually resolve it.
 	const slowTimer = setTimeout(() => {
 		if (inFlight) setState({ slow: true });
 	}, SLOW_WARNING_MS);
 
+	// Lost-response detector, driven by the real apaevt_task "end" event
+	// (see noteTaskEvent). Racing this against ingestBill means a dropped
+	// response is caught ~20s after the task actually finishes, instead of
+	// waiting out billIngestion's 300s blind backstop.
+	const lostAfterTaskEnd = new Promise<never>((_, reject) => {
+		onLostAfterTaskEnd = () => reject(new UploadTimeoutError('the task finished server-side but its result never reached this browser'));
+	});
+
 	try {
-		const outcome = await ingestBill(client, file, pipeline, opts);
-		setState({ result: outcome, errorMsg: null, stage: 'done', slow: false });
+		const outcome = await Promise.race([ingestBill(client, file, pipeline, opts), lostAfterTaskEnd]);
+		setState({ result: outcome, errorMsg: null, stage: 'done', slow: false, serverFinished: false });
 	} catch (e) {
-		setState({ result: null, errorMsg: e instanceof Error ? e.message : String(e), stage: 'done', slow: false });
+		if (e instanceof UploadTimeoutError) {
+			// Same honest reporting as billIngestion's own timeout path, but
+			// reached far sooner and with certainty about WHY: we saw the task
+			// end, so this is definitively a lost response, not slow work.
+			setState({
+				result: {
+					status: 'TIMEOUT',
+					fileName: file.name,
+					reasons: [
+						'The server finished reading this bill, but its result never reached this browser, so nothing could be saved.',
+						'Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.',
+					],
+				},
+				errorMsg: null,
+				stage: 'done',
+				slow: false,
+				serverFinished: false,
+			});
+		} else {
+			setState({ result: null, errorMsg: e instanceof Error ? e.message : String(e), stage: 'done', slow: false, serverFinished: false });
+		}
 	} finally {
 		clearTimeout(slowTimer);
+		if (taskEndTimer !== null) {
+			clearTimeout(taskEndTimer);
+			taskEndTimer = null;
+		}
+		onLostAfterTaskEnd = null;
 		inFlight = false;
 	}
 }
@@ -146,6 +228,11 @@ export function __resetUploadStoreForTests(): void {
 	inFlight = false;
 	state = INITIAL;
 	listeners.clear();
+	if (taskEndTimer !== null) {
+		clearTimeout(taskEndTimer);
+		taskEndTimer = null;
+	}
+	onLostAfterTaskEnd = null;
 }
 
 /** React binding. Any mounted component gets the live upload state,

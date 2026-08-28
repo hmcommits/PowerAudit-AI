@@ -36,7 +36,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RocketRideClient } from 'rocketride';
 import { getFoundationToken, sqlQuery } from '../src/lib/db';
-import { getUploadState, startUpload, subscribeUpload, __resetUploadStoreForTests } from '../src/lib/uploadStore';
+import { getUploadState, noteTaskEvent, startUpload, subscribeUpload, TASK_END_GRACE_MS, __resetUploadStoreForTests } from '../src/lib/uploadStore';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..', '..');
@@ -79,6 +79,7 @@ async function main() {
 	const okBillId = `bill-${okName.replace(/\.[^.]+$/, '')}`;
 	const timeoutBillId = `bill-${timeoutName.replace(/\.[^.]+$/, '')}`;
 	let sqlToken: string | null = null;
+	const cleanupIds: string[] = [okBillId, timeoutBillId];
 
 	try {
 		sqlToken = await getFoundationToken(client);
@@ -129,10 +130,54 @@ async function main() {
 
 		const timedOutRows = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [timeoutBillId]);
 		check(timedOutRows.length === 0, 'and that claim is true: no Bill row was written on the timeout path');
+		// ---------- C. THE MISSING WIRE ----------
+		// Replays the exact captured console event that used to be discarded:
+		//   apaevt_task {"action":"end","name":"bill-ingestion-app.dropper_1"}
+		// Before the fix App.tsx early-returned on any event that wasn't
+		// apaevt_status_upload, so this reached the browser and nothing
+		// consumed it. Now it must be consumed, and must resolve a lost
+		// response within the grace window instead of the 300s backstop.
+		console.log('\n--- C. apaevt_task "end" is actually consumed ---');
+		__resetUploadStoreForTests();
+		const lostName = `lostresponse_M001_${stamp}.pdf`;
+		const lostBillId = `bill-${lostName.replace(/\.[^.]+$/, '')}`;
+		cleanupIds.push(lostBillId);
+
+		const cStart = Date.now();
+		// A deliberately huge sendTimeout means the 300s backstop can NOT be
+		// what rescues this - only the task-end wire can.
+		// taskEndGraceMs is forced tiny so this is deterministic: a real
+		// upload can legitimately finish inside the default 20s window, which
+		// would make the case race rather than test what it claims to.
+		const pending = startUpload(client, new File([buf], lostName, { type: 'application/pdf' }), pipeline, { sendTimeoutMs: 3_600_000, taskEndGraceMs: 1 });
+
+		// Wait for the upload to be genuinely in flight, then replay the event.
+		await new Promise((r) => setTimeout(r, 1500));
+		check(getUploadState().serverFinished === false, 'before the event: store does not yet think the server finished');
+
+		noteTaskEvent({ action: 'end', name: 'bill-ingestion-app.dropper_1', source: 'dropper_1' });
+		check(getUploadState().serverFinished === true, 'apaevt_task "end" WAS consumed - the store reacted to it');
+
+		// An unrelated pipeline's task-end must not hijack our upload.
+		__hasNotHijacked(() => noteTaskEvent({ action: 'end', name: 'poweraudit-foundation-sql.tools_1', source: 'tools_1' }));
+
+		await pending;
+		const cElapsed = Date.now() - cStart;
+		const cResult = getUploadState().result;
+		console.log(`  Settled ${(cElapsed / 1000).toFixed(1)}s after start, status=${cResult?.status}`);
+
+		check(getUploadState().stage === 'done', 'the upload reached a terminal state instead of hanging forever');
+		check(cResult?.status === 'TIMEOUT', 'a lost response after task-end is reported as TIMEOUT');
+		check(cElapsed < TASK_END_GRACE_MS + 20_000, `resolved via the task-end wire (${(cElapsed / 1000).toFixed(1)}s), not the 300s backstop`);
+		check(
+			(cResult?.reasons.join(' ') ?? '').includes('never reached this browser'),
+			'the message explains precisely what happened: server finished, result never arrived'
+		);
+
 	} finally {
 		if (sqlToken) {
 			try {
-				for (const id of [okBillId, timeoutBillId]) {
+				for (const id of cleanupIds) {
 					await sqlQuery(client, sqlToken, 'DELETE FROM finding WHERE bill_id = $1', [id]);
 					await sqlQuery(client, sqlToken, 'DELETE FROM bill WHERE bill_id = $1', [id]);
 				}
@@ -146,6 +191,12 @@ async function main() {
 
 	console.log(`\n${failures === 0 ? 'PASSED' : 'FAILED'}: ${failures} failing check(s)`);
 	if (failures > 0) process.exit(1);
+}
+
+function __hasNotHijacked(fn: () => void): void {
+	const before = getUploadState().serverFinished;
+	fn();
+	check(getUploadState().serverFinished === before, "another pipeline's task-end event is correctly ignored");
 }
 
 main().catch((e) => {

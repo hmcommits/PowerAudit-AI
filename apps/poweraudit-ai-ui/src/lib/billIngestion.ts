@@ -18,7 +18,10 @@ import { getFoundationToken, sqlQuery, parseLineItems } from './db';
 import { calculateMdPenalty, calculatePfAdjustment, detectVariances, normalizeLineItems, scoreFindings, type ScoredFinding } from './calculators';
 import { STUB_CITATION, STUB_TARIFF_PARAMS } from './stubTariff';
 
-const BILL_INGESTION_SOURCE = 'dropper_1';
+/** Exported so uploadStore can recognise THIS pipeline's task events and
+ * ignore every other pipeline's (foundation-sql is `tools_1`,
+ * trend-recommendation is `chat_1`). */
+export const BILL_INGESTION_SOURCE = 'dropper_1';
 
 interface ExtractedFields {
 	meter_number?: string;
