@@ -4,10 +4,10 @@
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
-import { Banner, Button, Card, CardDataGrid, ContentHeader, EmptyState, ToggleGroup } from 'shell';
+import { Banner, Button, Card, CardDataGrid, ToggleGroup } from 'shell';
 import type { GridColumnDefinition } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
-import { LoadingState, MoneyValue, SUBTLE_TEXT_STYLE, moneyHtml } from '../lib/uiKit';
+import { EmptyStateCard, LoadingState, MoneyValue, SUBTLE_TEXT_STYLE, Term, ViewShell, moneyHtml } from '../lib/uiKit';
 
 interface MeterStatsRow {
 	[key: string]: unknown;
@@ -101,19 +101,30 @@ export const ComparisonsView: React.FC = () => {
 	const gridData = ranked.map((row) => ({ ...row, cost_per_kva: Math.round(costPerKva(row)) }));
 
 	return (
-		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-			<ContentHeader
-				title="Comparisons"
-				subtitle="Sites and meters ranked worst-outlier-first - meant to surface problems a quick read of the raw tables would miss."
-				actions={
-					<Button variant="secondary" small onClick={() => void stats.refetch()}>
-						Refresh
-					</Button>
-				}
-			/>
+		<ViewShell
+			title="Comparisons"
+			subtitle="Which sites are losing the most money — worst first."
+			actions={
+				<Button variant="secondary" small onClick={() => void stats.refetch()}>
+					Refresh
+				</Button>
+			}
+			intro={
+				<>
+					Every bar below is one electricity <Term term="Meter" /> — a single connection at one of your sites. They’re ranked worst-first, so the
+					sites costing you the most sit at the top. Use the toggle to re-rank by total money at stake, by how <em>often</em> a site gets penalised,
+					or by cost efficiency relative to the capacity it pays for (its <Term term="Contract Demand" />).
+				</>
+			}
+		>
 			{stats.error && <Banner variant="error">{stats.error}</Banner>}
-			{!stats.error && stats.loading && !stats.rows && <LoadingState label={stats.retrying ? 'Reconnecting…' : 'Loading comparisons…'} />}
-			{!stats.error && stats.rows && stats.rows.length === 0 && <EmptyState title="No meters yet" description="Run scripts/setup_schema.py and scripts/seed_meters.py first." />}
+			{!stats.error && stats.loading && !stats.rows && <LoadingState label={stats.retrying ? 'Reconnecting…' : 'Ranking sites by money at stake…'} />}
+			{!stats.error && stats.rows && stats.rows.length === 0 && (
+				<EmptyStateCard
+					title="No meters set up yet"
+					description="Once sites and their electricity meters are registered, this page ranks them worst-first so the biggest problems surface immediately."
+				/>
+			)}
 			{!stats.error && ranked.length > 0 && (
 				<>
 					<Card
@@ -158,6 +169,6 @@ export const ComparisonsView: React.FC = () => {
 					<CardDataGrid tableId="comparisons" title="All meters" columns={columns} data={gridData} paginate={false} noSearch />
 				</>
 			)}
-		</div>
+		</ViewShell>
 	);
 };
