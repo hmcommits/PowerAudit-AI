@@ -34,6 +34,36 @@ import { useSyncExternalStore } from 'react';
 import type { RocketRideClient } from 'shell';
 import { BILL_INGESTION_SOURCE, ingestBill, UploadTimeoutError, type IngestResult } from './billIngestion';
 
+/**
+ * Bump this whenever upload-completion behaviour changes. It is logged once
+ * at module load so a console capture proves WHICH build the preview is
+ * actually running - the dev overlay can serve a stale bundle, and without a
+ * marker there is no way to tell "the fix ran and correctly did nothing"
+ * apart from "the fix isn't there".
+ */
+export const UPLOAD_STORE_BUILD = 'upload-store/2026-08-28+task-end-wire';
+
+/** Survives a page reload (unlike module state) so a preview refresh
+ * mid-upload can be reported instead of silently resetting the dropzone. */
+const INTERRUPTED_KEY = 'poweraudit.uploadInFlight';
+
+function readInterrupted(): string | null {
+	try {
+		return sessionStorage.getItem(INTERRUPTED_KEY);
+	} catch {
+		return null;
+	}
+}
+
+function writeInterrupted(fileName: string | null): void {
+	try {
+		if (fileName === null) sessionStorage.removeItem(INTERRUPTED_KEY);
+		else sessionStorage.setItem(INTERRUPTED_KEY, fileName);
+	} catch {
+		/* private mode / storage disabled - degrade silently */
+	}
+}
+
 export type UploadStage = 'idle' | 'uploading' | 'processing' | 'done';
 
 export interface UploadState {
@@ -65,6 +95,32 @@ const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, erro
 let state: UploadState = INITIAL;
 let inFlight = false;
 const listeners = new Set<() => void>();
+
+// Runs once per page load. Two jobs: prove which build is live, and detect
+// an upload that a page reload killed mid-flight (the dev preview reloads
+// on every rebuild, and the Design tab's own manifestRefresh reloads it
+// too - either wipes this module's state and silently abandons the upload).
+console.log(`[poweraudit] ${UPLOAD_STORE_BUILD} loaded`);
+{
+	const interrupted = readInterrupted();
+	if (interrupted) {
+		writeInterrupted(null);
+		console.log(`[poweraudit] previous page session was uploading "${interrupted}" when it reloaded - that upload was abandoned client-side`);
+		state = {
+			...INITIAL,
+			stage: 'done',
+			fileName: interrupted,
+			result: {
+				status: 'TIMEOUT',
+				fileName: interrupted,
+				reasons: [
+					'This page reloaded while the bill was still being read, so the result was lost before it could be saved.',
+					'In the Design tab preview this happens on every rebuild. Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.',
+				],
+			},
+		};
+	}
+}
 
 function setState(patch: Partial<UploadState>): void {
 	state = { ...state, ...patch };
@@ -121,10 +177,25 @@ let currentGraceMs: number = 20_000;
  * anyone renamed the task; the source id is structural.
  */
 export function noteTaskEvent(body: { action?: string; name?: string; source?: string }): void {
-	if (!inFlight) return;
-	if (body.action !== 'end') return;
-	if (body.source !== BILL_INGESTION_SOURCE) return;
+	// Logged unconditionally, INCLUDING the no-op paths. The previous
+	// version returned silently when no upload was in flight, which made it
+	// impossible to tell from a console capture whether the fix was running
+	// and correctly ignoring the event, or not running at all. Every branch
+	// now says what it saw and what it decided.
+	if (!inFlight) {
+		console.log(`[poweraudit] apaevt_task ${body.action}/${body.source} IGNORED - no upload in flight in this page session`, UPLOAD_STORE_BUILD);
+		return;
+	}
+	if (body.action !== 'end') {
+		console.log(`[poweraudit] apaevt_task ${body.action}/${body.source} ignored - not an "end"`);
+		return;
+	}
+	if (body.source !== BILL_INGESTION_SOURCE) {
+		console.log(`[poweraudit] apaevt_task end/${body.source} ignored - not this app's upload pipeline (${BILL_INGESTION_SOURCE})`);
+		return;
+	}
 
+	console.log(`[poweraudit] apaevt_task end MATCHED for ${body.name} - server finished; waiting ${currentGraceMs}ms for the result`);
 	setState({ serverFinished: true });
 	if (taskEndTimer === null) {
 		taskEndTimer = setTimeout(() => {
@@ -164,6 +235,7 @@ export async function startUpload(
 	if (inFlight) return;
 	inFlight = true;
 	currentGraceMs = opts?.taskEndGraceMs ?? TASK_END_GRACE_MS;
+	writeInterrupted(file.name);
 	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false, serverFinished: false });
 
 	// Watchdog: the UI must never sit on a silent spinner. This only
@@ -206,6 +278,7 @@ export async function startUpload(
 			setState({ result: null, errorMsg: e instanceof Error ? e.message : String(e), stage: 'done', slow: false, serverFinished: false });
 		}
 	} finally {
+		writeInterrupted(null);
 		clearTimeout(slowTimer);
 		if (taskEndTimer !== null) {
 			clearTimeout(taskEndTimer);
