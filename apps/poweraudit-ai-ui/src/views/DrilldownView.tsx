@@ -4,13 +4,13 @@
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
-import { Banner, Button, Card, CardDataGrid, ContentHeader, EmptyState, InputField, useShellConnection } from 'shell';
+import { Banner, Button, Card, CardDataGrid, EmptyState, InputField, useShellConnection } from 'shell';
 import type { GridColumnDefinition, RocketRideClient } from 'shell';
 import { useSqlQuery } from '../lib/useSqlQuery';
 import { parseLineItems } from '../lib/db';
 import { approveClaimAction } from '../lib/claimActions';
 import { runWhatIf, type WhatIfOutcome } from '../lib/trendScan';
-import { Badge, ClaimStatusBadge, FindingTypeBadge, LoadingState, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE, Term, findingTypeHtml, moneyHtml } from '../lib/uiKit';
+import { Badge, ClaimStatusBadge, FindingTypeBadge, LoadingState, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE, Term, ViewShell, findingTypeHtml, moneyHtml } from '../lib/uiKit';
 
 interface MeterRow {
 	site_id: string;
@@ -196,16 +196,24 @@ export const DrilldownView: React.FC = () => {
 	const { client } = useShellConnection();
 
 	return (
-		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
-			<ContentHeader
-				title="Site Drill-down"
-				subtitle="Click a meter to see its full history - Bills, Findings, Alerts, and Claims, in order."
-				actions={
-					<Button variant="secondary" small onClick={refreshAll}>
-						Refresh
-					</Button>
-				}
-			/>
+		// scrollBody={false}: this view manages its own two independently
+		// scrolling columns, so ViewShell must NOT wrap them in a third
+		// scroller. Converting to ViewShell is the actual fix for the
+		// Alerts/What-If/Claims sections not scrolling: the hand-rolled root
+		// this replaced set height:100% but no minHeight:0, so the root
+		// refused to shrink below its content and the right column's
+		// overflowY:auto never engaged - the broken link was the ROOT, not
+		// the section divs.
+		<ViewShell
+			title="Site Drill-down"
+			subtitle="One meter's full story: what it was billed, what we found, what's coming, and what's being claimed back."
+			scrollBody={false}
+			actions={
+				<Button variant="secondary" small onClick={refreshAll}>
+					Refresh
+				</Button>
+			}
+		>
 			{meters.error && <Banner variant="error">{meters.error}</Banner>}
 			{!meters.error && meters.loading && !meters.rows && <LoadingState label={meters.retrying ? 'Reconnecting…' : 'Loading meters…'} />}
 			{!meters.error && meters.rows && meters.rows.length === 0 && (
@@ -213,7 +221,8 @@ export const DrilldownView: React.FC = () => {
 			)}
 			{!meters.error && meters.rows && meters.rows.length > 0 && (
 				<div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-					<Card header="Meters" noBodyPadding fill>
+					<div style={{ width: 260, flexShrink: 0, minHeight: 0, display: 'flex' }}>
+						<Card header="Meters" noBodyPadding fill>
 						<div style={{ overflowY: 'auto', height: '100%' }}>
 							{Object.entries(
 								meters.rows.reduce<Record<string, MeterRow[]>>((acc, m) => {
@@ -242,10 +251,11 @@ export const DrilldownView: React.FC = () => {
 									))}
 								</div>
 							))}
-						</div>
-					</Card>
+							</div>
+						</Card>
+					</div>
 
-					<div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+					<div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
 						{activeMeter && (
 							<Banner variant="info">
 								{activeMeter.meter_id} — {activeMeter.discom}, {activeMeter.tariff_category}, Contract Demand {activeMeter.contract_demand_kva} kVA, site{' '}
@@ -268,7 +278,7 @@ export const DrilldownView: React.FC = () => {
 					</div>
 				</div>
 			)}
-		</div>
+		</ViewShell>
 	);
 };
 

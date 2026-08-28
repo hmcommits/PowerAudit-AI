@@ -34,52 +34,127 @@ export const UploadView: React.FC = () => {
 		[client],
 	);
 
+	// Which pipeline step is live right now, so the explainer on the right
+	// doubles as a progress indicator instead of being static decoration.
+	const activeStep = stage === 'uploading' ? 0 : stage === 'processing' ? 2 : stage === 'done' ? 4 : -1;
+
 	return (
-		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+		<div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, height: '100%', minHeight: 0, boxSizing: 'border-box' }}>
 			<ContentHeader
 				title="Upload Bill"
 				subtitle="Drop a scanned or photographed electricity bill (PDF or photo) to ingest, validate, and recalculate it live - the same pipeline scripts/ingest_bills.py runs, triggered from here instead of a terminal."
 			/>
 
-			{stage === 'idle' && (
-				<Card>
-					<DropZone title="Drop a bill here to ingest" hint="Supports PDF, JPG, PNG" onFiles={handleFiles} />
-					{!isConnected && <Banner variant="warning">Not connected - reconnect before uploading.</Banner>}
-				</Card>
-			)}
+			<div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+				<div style={{ flex: '1 1 460px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+				{stage === 'idle' && (
+					<Card>
+						<DropZone title="Drop a bill here to ingest" hint="Supports PDF, JPG, PNG" onFiles={handleFiles} />
+						{!isConnected && <Banner variant="warning">Not connected - reconnect before uploading.</Banner>}
+					</Card>
+				)}
 
-			{(stage === 'uploading' || stage === 'processing') && (
-				<Card header={fileName ? `Processing ${fileName}…` : 'Processing…'}>
-					<ProcessingIndicator stage={stage} progressPct={progressPct} />
-					<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
-						You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
-					</div>
-					{serverFinished && (
-						<div style={{ marginTop: 12 }}>
-							<Banner variant="info">The server has finished reading this bill and the result is on its way.</Banner>
+				{(stage === 'uploading' || stage === 'processing') && (
+					<Card header={fileName ? `Processing ${fileName}…` : 'Processing…'}>
+						<ProcessingIndicator stage={stage} progressPct={progressPct} />
+						<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
+							You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
 						</div>
-					)}
-					{slow && !serverFinished && (
-						<div style={{ marginTop: 12 }}>
-							<Banner variant="warning">
-								This is taking longer than usual. Reading a bill normally finishes in about two minutes — it may still complete on its own. If it
-								doesn’t, you’ll get a clear message rather than an endless spinner, and re-uploading the same file is always safe.
-							</Banner>
-						</div>
-					)}
-				</Card>
-			)}
+						{serverFinished && (
+							<div style={{ marginTop: 12 }}>
+								<Banner variant="info">The server has finished reading this bill and the result is on its way.</Banner>
+							</div>
+						)}
+						{slow && !serverFinished && (
+							<div style={{ marginTop: 12 }}>
+								<Banner variant="warning">
+									This is taking longer than usual. Reading a bill normally finishes in about two minutes — it may still complete on its own. If it
+									doesn’t, you’ll get a clear message rather than an endless spinner, and re-uploading the same file is always safe.
+								</Banner>
+							</div>
+						)}
+					</Card>
+				)}
 
-			{stage === 'done' && (
-				<div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-					{errorMsg && <Banner variant="error">Unexpected error: {errorMsg}</Banner>}
-					{result && <ResultCard result={result} />}
-					<Button onClick={resetUpload}>Upload another bill</Button>
+				{stage === 'done' && (
+					<div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+						{errorMsg && <Banner variant="error">Unexpected error: {errorMsg}</Banner>}
+						{result && <ResultCard result={result} />}
+						<Button onClick={resetUpload}>Upload another bill</Button>
 				</div>
 			)}
+				</div>
+				<div style={{ flex: '1 1 320px', minWidth: 280, maxWidth: 420 }}>
+					<PipelineExplainer activeStep={activeStep} />
+				</div>
+			</div>
 		</div>
 	);
 };
+
+interface PipelineStep {
+	title: string;
+	detail: string;
+}
+
+/** The five stages a dropped bill actually goes through. Written for someone
+ * who has never seen the pipeline - it answers "what is it doing right now?"
+ * during the ~20s-2min wait, and fills what was otherwise dead space to the
+ * right of the dropzone. */
+const PIPELINE_STEPS: PipelineStep[] = [
+	{ title: 'Your bill', detail: 'A PDF or a phone photo, exactly as the utility issued it. Nothing needs to be typed in by hand.' },
+	{ title: 'Reading the page', detail: 'RocketRide cleans up the image and runs OCR, so even a skewed, low-light photo becomes machine-readable text.' },
+	{ title: 'Pulling out the numbers', detail: 'An AI extraction step finds the meter number, billing period, agreed limit, peak demand, power factor, line items and total.' },
+	{ title: 'Checking the maths', detail: 'Plain, auditable code — no AI — recalculates the penalties against the tariff rules and compares them to what you were charged.' },
+	{ title: 'What we found', detail: 'Any discrepancy is saved as a finding with its rupee value, ready to review and turn into a refund claim.' },
+];
+
+function PipelineExplainer({ activeStep }: { activeStep: number }): React.ReactElement {
+	return (
+		<Card header="What happens to your bill">
+			<div style={{ ...SUBTLE_TEXT_STYLE, marginBottom: 14 }}>
+				Five steps run on RocketRide each time you drop a file in. {activeStep >= 0 ? 'The highlighted step is roughly where it is now.' : 'Nothing is running yet.'}
+			</div>
+			<div style={{ display: 'flex', flexDirection: 'column' }}>
+				{PIPELINE_STEPS.map((step, i) => {
+					const isActive = activeStep >= 0 && i <= activeStep;
+					const isCurrent = i === activeStep;
+					return (
+						<div key={step.title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+							<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'stretch' }}>
+								<div
+									style={{
+										width: 22,
+										height: 22,
+										borderRadius: '50%',
+										flexShrink: 0,
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'center',
+										fontSize: 11,
+										fontWeight: 700,
+										background: isActive ? 'var(--rr-color-brand, #4f46e5)' : 'var(--rr-surface-secondary, rgba(128,128,128,0.18))',
+										color: isActive ? '#fff' : 'var(--rr-text-secondary)',
+										border: isCurrent ? '2px solid var(--rr-color-brand, #4f46e5)' : undefined,
+									}}
+								>
+									{i + 1}
+								</div>
+								{i < PIPELINE_STEPS.length - 1 && (
+									<div style={{ width: 2, flex: 1, minHeight: 18, background: isActive ? 'var(--rr-color-brand, #4f46e5)' : 'var(--rr-border-color, rgba(128,128,128,0.25))' }} />
+								)}
+							</div>
+							<div style={{ paddingBottom: 14 }}>
+								<div style={{ fontWeight: 600, fontSize: 13 }}>{step.title}</div>
+								<div style={{ ...SUBTLE_TEXT_STYLE, marginTop: 2, lineHeight: 1.5 }}>{step.detail}</div>
+							</div>
+						</div>
+					);
+				})}
+			</div>
+		</Card>
+	);
+}
 
 function ProcessingIndicator({ stage, progressPct }: { stage: 'uploading' | 'processing'; progressPct: number }): React.ReactElement {
 	return (

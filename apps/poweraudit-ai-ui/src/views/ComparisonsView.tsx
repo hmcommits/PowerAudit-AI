@@ -141,8 +141,15 @@ export const ComparisonsView: React.FC = () => {
 							/>
 						}
 					>
-						<div style={{ marginBottom: 12, ...SUBTLE_TEXT_STYLE }}>{METRIC_LABEL[metric]}, worst first</div>
-						<div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+						<div style={{ marginBottom: 12, ...SUBTLE_TEXT_STYLE }}>
+							{METRIC_LABEL[metric]}, worst first — {ranked.length} meters
+						</div>
+						{/* Capped with its own scroll: with 15 meters this list is
+						    taller than the viewport, which pushed the "All meters"
+						    table below it out of reach and made the chart itself
+						    look like it wasn't rendering. Bounding it here means
+						    both are always reachable. */}
+						<div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
 							{ranked.map((row, idx) => {
 								const value = metricValue(row, metric);
 								const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, value > 0 ? 2 : 0) : 0;
