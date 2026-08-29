@@ -3,6 +3,7 @@
     {
       "id": "webhook_1",
       "provider": "webhook",
+      "name": "Webhook",
       "config": {
         "hideForm": true,
         "mode": "Source",
@@ -11,12 +12,12 @@
       },
       "ui": {
         "position": {
-          "x": 20,
+          "x": 10,
           "y": 200
         },
         "measured": {
           "width": 150,
-          "height": 66
+          "height": 174
         },
         "nodeType": "default",
         "formDataValid": true
@@ -25,13 +26,8 @@
     {
       "id": "parse_1",
       "provider": "parse",
+      "name": "Parser",
       "config": {},
-      "input": [
-        {
-          "lane": "tags",
-          "from": "webhook_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 240,
@@ -39,24 +35,30 @@
         },
         "measured": {
           "width": 150,
-          "height": 66
+          "height": 138
         },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "webhook_1"
+        }
+      ]
     },
     {
       "id": "preprocessor_langchain_1",
       "provider": "preprocessor_langchain",
+      "name": "General Text",
       "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter"
+        },
         "parameters": {}
       },
-      "input": [
-        {
-          "lane": "text",
-          "from": "parse_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 460,
@@ -64,25 +66,26 @@
         },
         "measured": {
           "width": 150,
-          "height": 66
+          "height": 86
         },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parse_1"
+        }
+      ]
     },
     {
       "id": "embedding_transformer_1",
       "provider": "embedding_transformer",
+      "name": "Transformer",
       "config": {
         "profile": "miniLM",
         "parameters": {}
       },
-      "input": [
-        {
-          "lane": "documents",
-          "from": "preprocessor_langchain_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 680,
@@ -90,15 +93,22 @@
         },
         "measured": {
           "width": 150,
-          "height": 66
+          "height": 86
         },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "preprocessor_langchain_1"
+        }
+      ]
     },
     {
       "id": "rocketride_vector_1",
       "provider": "rocketride_vector",
+      "name": "RocketRide Vector",
       "config": {
         "profile": "cloud",
         "cloud": {
@@ -110,12 +120,6 @@
         },
         "parameters": {}
       },
-      "input": [
-        {
-          "lane": "documents",
-          "from": "embedding_transformer_1"
-        }
-      ],
       "ui": {
         "position": {
           "x": 900,
@@ -123,19 +127,27 @@
         },
         "measured": {
           "width": 150,
-          "height": 135
+          "height": 103
         },
         "nodeType": "default",
         "formDataValid": true
-      }
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_transformer_1"
+        }
+      ]
     }
   ],
   "source": "webhook_1",
   "project_id": "d1e9c2b7-6a4f-4e21-9c3a-7b5d2f8e1a44",
-  "viewport": {
-    "x": 0,
-    "y": 0,
-    "zoom": 1
-  },
-  "version": 1
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 1
 }

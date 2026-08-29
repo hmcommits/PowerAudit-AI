@@ -75,7 +75,19 @@ const App: React.FC<ShellAppProps> = () => {
 	const sidebar = useMemo(
 		() => (
 			<div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-				<SidebarMenu menu={MENU} activeId={view} onSelect={(id) => setView(id as ViewId)} sectionLabel="PowerAudit AI" />
+				{/* SidebarMenu takes menu/activeId/onSelect/sectionLabel/collapsed
+				    only - no style or size prop (its rows are fixed inline styles
+				    with no className hook, same as DropZone) - so `zoom` is the
+				    lever for bigger, more prominent tabs. Kept modest (1.2x, not
+				    the 2.2x used on the dropzone) because AppLayout owns the
+				    sidebar's width (~260px, not ours to resize) and zoom scales an
+				    item's rendered width along with its text - too high a factor
+				    risks the longer labels ("Portfolio Summary", "Site Drill-down")
+				    wrapping or clipping inside that fixed column. The tagline below
+				    is deliberately OUTSIDE the zoomed wrapper, unchanged. */}
+				<div style={{ zoom: 1.2 } as React.CSSProperties}>
+					<SidebarMenu menu={MENU} activeId={view} onSelect={(id) => setView(id as ViewId)} sectionLabel="PowerAudit AI" />
+				</div>
 				<div style={{ marginTop: 'auto', padding: '12px 12px 4px', fontSize: 11, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>{PRODUCT_TAGLINE}</div>
 			</div>
 		),

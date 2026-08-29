@@ -49,7 +49,18 @@ export const UploadView: React.FC = () => {
 				<div style={{ flex: '1 1 460px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
 				{stage === 'idle' && (
 					<Card>
-						<DropZone title="Drop a bill here to ingest" hint="Supports PDF, JPG, PNG" onFiles={handleFiles} />
+						{/* DropZone takes only title/hint/onFiles - no style or size
+						    prop (checked its source: fixed inline styles, no
+						    className hook) - so `zoom` is the one lever that scales
+						    its "+" icon, text, and padding together without reaching
+						    into shell internals. minHeight centers it at a size that
+						    reads as a large, obvious target next to the pipeline
+						    explainer beside it. */}
+						<div style={{ minHeight: 380, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+							<div style={{ zoom: 2.2, width: '100%', maxWidth: 420 } as React.CSSProperties}>
+								<DropZone title="Drop a bill here to ingest" hint="Supports PDF, JPG, PNG" onFiles={handleFiles} />
+							</div>
+						</div>
 						{!isConnected && <Banner variant="warning">Not connected - reconnect before uploading.</Banner>}
 					</Card>
 				)}
