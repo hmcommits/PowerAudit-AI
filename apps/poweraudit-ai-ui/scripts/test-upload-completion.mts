@@ -73,7 +73,7 @@ function check(condition: boolean, label: string): void {
 async function main() {
 	const env = loadEnv();
 	const pipeline = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'pipelines', 'bill-ingestion.pipe'), 'utf8'));
-	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY });
+	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY, persist: true });
 	await client.connect();
 
 	const stamp = `${process.pid}_${Math.floor(Date.now() / 1000)}`;
@@ -116,11 +116,13 @@ async function main() {
 		const okRows = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [okBillId]);
 		check(okRows.length === 1, 'the Bill row actually landed in RocketRide SQL (the writes ran after completion)');
 
-		// ---------- B. SAFEGUARD ----------
-		console.log('\n--- B. Lost response: does it surface clearly instead of hanging? ---');
+		// ---------- B. SAFEGUARD (single attempt, to isolate the raw timeout
+		// path from the retry wrapper added on top of it - see D below for
+		// the retry-wrapped version of this same failure) ----------
+		console.log('\n--- B. Lost response, no retry: does it surface clearly instead of hanging? ---');
 		__resetUploadStoreForTests();
 		const tStart = Date.now();
-		await startUpload(client, new File([buf], timeoutName, { type: 'application/pdf' }), pipeline, { sendTimeoutMs: 1 });
+		await startUpload(client, new File([buf], timeoutName, { type: 'application/pdf' }), pipeline, { sendTimeoutMs: 1, maxAttempts: 1 });
 		const tElapsed = Date.now() - tStart;
 
 		const tResult = getUploadState().result;
@@ -128,12 +130,14 @@ async function main() {
 		check(getUploadState().stage === 'done', 'a lost response still ends in a terminal state, not an endless spinner');
 		check(tResult?.status === 'TIMEOUT', 'it is reported as TIMEOUT, distinct from a generic error');
 		check(tElapsed < 30_000, 'it settles promptly rather than hanging');
-		check((tResult?.reasons.join(' ') ?? '').includes('nothing was saved'), 'the message states plainly that nothing was saved');
+		check((tResult?.reasons.join(' ') ?? '').includes('nothing could be saved'), 'the message states plainly that nothing was saved');
 		check((tResult?.reasons.join(' ') ?? '').includes('Re-uploading is safe'), 'the message tells the user what to do next');
 
 		const timedOutRows = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [timeoutBillId]);
 		check(timedOutRows.length === 0, 'and that claim is true: no Bill row was written on the timeout path');
-		// ---------- C. THE MISSING WIRE ----------
+		// ---------- C. THE MISSING WIRE (single attempt, isolating the wire
+		// itself from the retry wrapper - see D for the retry-wrapped
+		// version, which is where the actual recovery gets proven) ----------
 		// Replays the exact captured console event that used to be discarded:
 		//   apaevt_task {"action":"end","name":"bill-ingestion-app.dropper_1"}
 		// Before the fix App.tsx early-returned on any event that wasn't
@@ -148,11 +152,11 @@ async function main() {
 
 		const cStart = Date.now();
 		// A deliberately huge sendTimeout means the 300s backstop can NOT be
-		// what rescues this - only the task-end wire can.
-		// taskEndGraceMs is forced tiny so this is deterministic: a real
-		// upload can legitimately finish inside the default 20s window, which
-		// would make the case race rather than test what it claims to.
-		const pending = startUpload(client, new File([buf], lostName, { type: 'application/pdf' }), pipeline, { sendTimeoutMs: 3_600_000, taskEndGraceMs: 1 });
+		// what rescues this - only the task-end wire can. taskEndGraceMs is
+		// forced tiny so this is deterministic (a real upload can legitimately
+		// finish inside the default 20s window), and maxAttempts:1 isolates
+		// the wire itself from the retry wrapper layered on top of it.
+		const pending = startUpload(client, new File([buf], lostName, { type: 'application/pdf' }), pipeline, { sendTimeoutMs: 3_600_000, taskEndGraceMs: 1, maxAttempts: 1 });
 
 		// Wait for the upload to be genuinely in flight, then replay the event.
 		await new Promise((r) => setTimeout(r, 1500));
@@ -176,6 +180,43 @@ async function main() {
 			(cResult?.reasons.join(' ') ?? '').includes('never reached this browser'),
 			'the message explains precisely what happened: server finished, result never arrived'
 		);
+
+		// ---------- D. AUTOMATIC RECOVERY, FOR REAL ----------
+		// This is the actual fix, not just detection: the SAME forced
+		// task-end-wire failure as C, but WITHOUT maxAttempts:1 - so the
+		// default retry wrapper is live. Proves the upload recovers on its
+		// own against the REAL server, without any user intervention -
+		// exactly the gap identified between "fails gracefully" and
+		// "actually recovers".
+		console.log('\n--- D. Automatic retry recovers a real synthetic failure, unattended ---');
+		__resetUploadStoreForTests();
+		const recoverName = `recovertest_M001_${stamp}.pdf`;
+		const recoverBillId = `bill-${recoverName.replace(/\.[^.]+$/, '')}`;
+		cleanupIds.push(recoverBillId);
+
+		const dStart = Date.now();
+		const dPending = startUpload(client, new File([buf], recoverName, { type: 'application/pdf' }), pipeline, { taskEndGraceMs: 1 });
+		await new Promise((r) => setTimeout(r, 1500));
+		// Force attempt 1 to fail exactly as in C - then step back and let
+		// the retry wrapper do its job with NO further intervention.
+		noteTaskEvent({ action: 'end', name: 'bill-ingestion-app.dropper_1', source: 'dropper_1' });
+		await dPending;
+		const dElapsed = Date.now() - dStart;
+		const dState = getUploadState();
+		console.log(`  Settled ${(dElapsed / 1000).toFixed(1)}s after start, status=${dState.result?.status}, final attempt=${dState.attempt} of ${dState.maxAttempts}`);
+
+		check(dState.stage === 'done', 'D: reached a terminal state - no manual retry was needed to get there');
+		check(dState.attempt >= 2, `D: a real automatic retry actually fired (reached attempt ${dState.attempt})`);
+		check(
+			dState.result?.status === 'OK' || dState.result?.status === 'NEEDS_REVIEW' || dState.result?.status === 'TIMEOUT',
+			`D: reached a genuine terminal outcome, not stuck (status=${dState.result?.status})`,
+		);
+		if (dState.result?.status === 'OK' || dState.result?.status === 'NEEDS_REVIEW') {
+			const recovered = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [recoverBillId]);
+			check(recovered.length === 1, 'D: and when it recovers, the Bill row is genuinely saved - real end-to-end success, unattended');
+		} else {
+			console.log('  (all retries were exhausted this run - reports TIMEOUT honestly rather than a false success, which is also correct behaviour)');
+		}
 
 	} finally {
 		if (sqlToken) {

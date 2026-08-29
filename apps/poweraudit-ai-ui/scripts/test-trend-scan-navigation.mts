@@ -81,7 +81,7 @@ async function historyFor(client: any, token: string, meterId: string) {
 
 async function main() {
 	const env = loadEnv();
-	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY });
+	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY, persist: true });
 	await client.connect();
 
 	try {

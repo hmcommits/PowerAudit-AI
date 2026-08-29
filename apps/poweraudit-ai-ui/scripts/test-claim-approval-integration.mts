@@ -93,7 +93,7 @@ async function setStatusDirect(client: any, token: string, claimId: string, stat
 
 async function main() {
 	const env = loadEnv();
-	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY });
+	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY, persist: true });
 	await client.connect();
 
 	try {

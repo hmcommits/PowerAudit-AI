@@ -74,7 +74,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function main() {
 	const env = loadEnv();
 	const pipeline = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'pipelines', 'bill-ingestion.pipe'), 'utf8'));
-	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY });
+	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY, persist: true });
 	await client.connect();
 
 	// Unique name -> unique bill_id -> provably a fresh INSERT, not an UPDATE.

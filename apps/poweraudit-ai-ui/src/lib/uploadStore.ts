@@ -33,6 +33,7 @@
 import { useSyncExternalStore } from 'react';
 import type { RocketRideClient } from 'shell';
 import { BILL_INGESTION_SOURCE, ingestBill, UploadTimeoutError, type IngestResult } from './billIngestion';
+import { withRetries } from './retry';
 
 /**
  * Bump this whenever upload-completion behaviour changes. It is logged once
@@ -84,13 +85,18 @@ export interface UploadState {
 	 * "the server finished, collecting the result" instead of a bare
 	 * spinner, and is the signal the lost-response detector runs on. */
 	serverFinished: boolean;
+	/** 1-based number of the attempt currently running. Stays 1 through a
+	 * normal upload; only visible to the UI once a retry actually starts. */
+	attempt: number;
+	/** Total attempts this run will make before giving up. */
+	maxAttempts: number;
 }
 
 /** Warn (don't fail) after 90s - comfortably past a normal ~2 minute run's
  * halfway point, and well before billIngestion's 180s hard timeout. */
 export const SLOW_WARNING_MS = 90_000;
 
-const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null, slow: false, serverFinished: false };
+const INITIAL: UploadState = { stage: 'idle', progressPct: 0, result: null, errorMsg: null, fileName: null, slow: false, serverFinished: false, attempt: 1, maxAttempts: 1 };
 
 let state: UploadState = INITIAL;
 let inFlight = false;
@@ -216,10 +222,69 @@ export function noteUploadProgress(body: { action?: string; bytes_sent?: number;
 	setState({ progressPct, stage: action === 'complete' ? 'processing' : 'uploading' });
 }
 
+/** Total attempts a single startUpload() run makes before giving up -
+ * the first try plus up to this many automatic retries. Sized per the
+ * investigation: the confirmed failure (a transient WebSocket handshake
+ * 503, or a silently stalled connection) is a short-lived blip, not a
+ * sustained outage, so a small number of tries a few seconds apart either
+ * recovers quickly or confirms the problem is not transient. */
+export const MAX_UPLOAD_ATTEMPTS = 3;
+/** Delay between attempts. Long enough to give a transient server-side
+ * hiccup room to clear (and, if this browser tab's transport is mid
+ * reconnect for an unrelated reason, room for that to finish too) without
+ * feeling like a second multi-minute wait. */
+export const RETRY_DELAY_MS = 5_000;
+
+/** Runs exactly one upload attempt, including its own task-end race. Split
+ * out of startUpload so each RETRY gets a fresh race and a fresh grace
+ * timer, rather than one race shared across every attempt. */
+async function attemptUpload(client: RocketRideClient, file: File, pipeline: Record<string, unknown>, opts?: { sendTimeoutMs?: number; taskEndGraceMs?: number }): Promise<IngestResult> {
+	currentGraceMs = opts?.taskEndGraceMs ?? TASK_END_GRACE_MS;
+	setState({ serverFinished: false });
+
+	const lostAfterTaskEnd = new Promise<never>((_, reject) => {
+		onLostAfterTaskEnd = () => reject(new UploadTimeoutError('the task finished server-side but its result never reached this browser', 'task-end-wire'));
+	});
+
+	try {
+		return await Promise.race([ingestBill(client, file, pipeline, opts), lostAfterTaskEnd]);
+	} finally {
+		if (taskEndTimer !== null) {
+			clearTimeout(taskEndTimer);
+			taskEndTimer = null;
+		}
+		onLostAfterTaskEnd = null;
+	}
+}
+
 /**
- * Run a real upload to completion, independent of component lifecycle.
+ * Run a real upload to completion, independent of component lifecycle,
+ * automatically retrying a transient failure before ever surfacing
+ * anything to the user.
+ *
+ * WHY RETRY HERE, NOT DEEPER: the RocketRide SDK's own reconnect (`persist:
+ * true`, capped linear backoff - see ROCKETRIDE_typescript_API.md) only
+ * engages once its transport recognizes a disconnect, AND the browser app
+ * doesn't own that client's construction to begin with - useShellConnection()
+ * returns a client built by the shell's ConnectionManager, so `persist`/
+ * `requestTimeout` aren't configurable from here (checked shell.d.ts: no
+ * escape hatch, and sendFiles() itself takes no per-call timeout override
+ * either). A connection that stalls WITHOUT the WebSocket ever firing
+ * `close` - plausible for the confirmed 503-at-handshake pattern, if the
+ * same instability can also leave an established connection in limbo -
+ * never fires ANY reconnect logic gated on that event, the SDK's or a
+ * hypothetical one of ours. Retrying the WHOLE upload attempt at the level
+ * this app actually controls is therefore not a lesser workaround for a
+ * better mechanism we're missing; it's the only layer address-able from
+ * here at all.
+ *
+ * Each attempt is a genuinely fresh try: a new sendFiles() call, a new
+ * task-end race. Retrying is safe regardless of what happened to the
+ * previous attempt - bills are keyed by a deterministic filename-derived
+ * id, so re-processing the same file updates rather than duplicates.
+ *
  * Deliberately NOT cancelled on unmount: the server-side pipeline work is
- * already committed once the file is sent, so abandoning the promise would
+ * already committed once a file is sent, so abandoning the promise would
  * only lose the RESULT (and the SQL writes that follow extraction), which
  * is exactly the bug this store fixes.
  *
@@ -230,44 +295,49 @@ export async function startUpload(
 	client: RocketRideClient,
 	file: File,
 	pipeline: Record<string, unknown>,
-	opts?: { sendTimeoutMs?: number; taskEndGraceMs?: number },
+	opts?: { sendTimeoutMs?: number; taskEndGraceMs?: number; maxAttempts?: number },
 ): Promise<void> {
 	if (inFlight) return;
 	inFlight = true;
-	currentGraceMs = opts?.taskEndGraceMs ?? TASK_END_GRACE_MS;
+	const maxAttempts = opts?.maxAttempts ?? MAX_UPLOAD_ATTEMPTS;
 	writeInterrupted(file.name);
-	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false, serverFinished: false });
+	setState({ stage: 'uploading', progressPct: 0, result: null, errorMsg: null, fileName: file.name, slow: false, serverFinished: false, attempt: 1, maxAttempts });
 
 	// Watchdog: the UI must never sit on a silent spinner. This only
-	// ANNOUNCES slowness; the two mechanisms below actually resolve it.
+	// ANNOUNCES slowness; the mechanisms below actually resolve it.
 	const slowTimer = setTimeout(() => {
 		if (inFlight) setState({ slow: true });
 	}, SLOW_WARNING_MS);
 
-	// Lost-response detector, driven by the real apaevt_task "end" event
-	// (see noteTaskEvent). Racing this against ingestBill means a dropped
-	// response is caught ~20s after the task actually finishes, instead of
-	// waiting out billIngestion's 300s blind backstop.
-	const lostAfterTaskEnd = new Promise<never>((_, reject) => {
-		onLostAfterTaskEnd = () => reject(new UploadTimeoutError('the task finished server-side but its result never reached this browser'));
-	});
-
 	try {
-		const outcome = await Promise.race([ingestBill(client, file, pipeline, opts), lostAfterTaskEnd]);
+		const outcome = await withRetries(() => attemptUpload(client, file, pipeline, opts), {
+			attempts: maxAttempts,
+			delayMs: RETRY_DELAY_MS,
+			onRetry: (nextAttempt, total, error) => {
+				const reason = error instanceof Error ? error.message : String(error);
+				console.log(`[poweraudit] upload attempt failed (${reason}) - retrying automatically, attempt ${nextAttempt} of ${total}`);
+				setState({ attempt: nextAttempt, slow: false, serverFinished: false, progressPct: 0 });
+			},
+		});
 		setState({ result: outcome, errorMsg: null, stage: 'done', slow: false, serverFinished: false });
 	} catch (e) {
 		if (e instanceof UploadTimeoutError) {
-			// Same honest reporting as billIngestion's own timeout path, but
-			// reached far sooner and with certainty about WHY: we saw the task
-			// end, so this is definitively a lost response, not slow work.
+			// Every automatic attempt is exhausted. Keep the two DIFFERENT,
+			// deliberately-worded explanations distinct rather than collapsing
+			// them into one generic message: "we saw the task finish server-side"
+			// is a stronger, more precise claim than "we waited a while with no
+			// signal either way" - conflating them would understate what the
+			// task-end wire actually proved on the last attempt.
+			const attemptsPhrase = maxAttempts > 1 ? ` after ${maxAttempts} attempts` : '';
+			const primaryReason =
+				e.reason === 'task-end-wire'
+					? `The server finished reading this bill${attemptsPhrase}, but its result never reached this browser, so nothing could be saved.`
+					: `The server did not respond${attemptsPhrase}, so nothing could be saved.`;
 			setState({
 				result: {
 					status: 'TIMEOUT',
 					fileName: file.name,
-					reasons: [
-						'The server finished reading this bill, but its result never reached this browser, so nothing could be saved.',
-						'Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.',
-					],
+					reasons: [primaryReason, 'Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.'],
 				},
 				errorMsg: null,
 				stage: 'done',

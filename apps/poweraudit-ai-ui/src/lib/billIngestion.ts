@@ -67,15 +67,21 @@ export type IngestStatus = 'OK' | 'NEEDS_REVIEW' | 'REJECTED' | 'ERROR' | 'TIMEO
 export const SEND_TIMEOUT_MS = 300_000;
 
 export class UploadTimeoutError extends Error {
-	constructor(message: string) {
+	/** Which detector raised this - lets the caller give an accurate,
+	 * specific explanation instead of one generic message covering two
+	 * different situations ("we know the server finished" is a stronger,
+	 * more precise claim than "we waited a while and gave up blind"). */
+	readonly reason: 'task-end-wire' | 'blind-backstop';
+	constructor(message: string, reason: 'task-end-wire' | 'blind-backstop') {
 		super(message);
 		this.name = 'UploadTimeoutError';
+		this.reason = reason;
 	}
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new UploadTimeoutError(message)), ms);
+		const timer = setTimeout(() => reject(new UploadTimeoutError(message, 'blind-backstop')), ms);
 		promise.then(
 			(v) => {
 				clearTimeout(timer);
@@ -300,22 +306,29 @@ export async function ingestBill(
 		// The SQL writes below are performed BY THIS CLIENT after extraction
 		// returns - so a lost response means they were never attempted, not
 		// that they failed. Check the database directly rather than guessing,
-		// so the user is told definitively whether anything was saved.
+		// so the caller is told definitively whether anything was saved.
 		const existing = await sqlQuery<{ bill_id: string }>(client, sqlToken, 'SELECT bill_id FROM bill WHERE bill_id = $1', [billId]);
-		const landed = existing.length > 0;
-		return {
-			status: 'TIMEOUT',
-			fileName: file.name,
-			billId: landed ? billId : undefined,
-			reasons: landed
-				? [
-						'The server did not respond in time, but a bill with this filename IS on record - it may be from an earlier upload of the same file. Check Site Drill-down to confirm the figures are the ones you expected.',
-					]
-				: [
-						'The server did not respond in time, and nothing was saved for this file.',
-						'The extraction may still have completed server-side, but its result never reached this browser - so the bill could not be written. Re-uploading is safe: bills are keyed by filename, so a retry updates rather than duplicates.',
-					],
-		};
+		if (existing.length > 0) {
+			// Landed despite the timeout - a genuine (if late) result. Nothing
+			// to gain by retrying something that already happened.
+			return {
+				status: 'TIMEOUT',
+				fileName: file.name,
+				billId,
+				reasons: [
+					'The server did not respond in time, but a bill with this filename IS on record - it may be from an earlier upload of the same file. Check Site Drill-down to confirm the figures are the ones you expected.',
+				],
+			};
+		}
+		// Nothing was saved. This is RETRYABLE, not terminal - re-throw
+		// (rather than returning a TIMEOUT result directly) so the caller
+		// (uploadStore.startUpload) can attempt again before surfacing
+		// anything to the user. A single lost response is exactly the
+		// transient failure pattern confirmed tonight (a WebSocket handshake
+		// 503 or a silent stall), and re-uploading is safe regardless: bills
+		// are keyed by a deterministic filename-derived id, so a retry
+		// updates rather than duplicates.
+		throw e;
 	}
 
 	const entry = results[0] as { action?: string; result?: Record<string, unknown>; error?: unknown };

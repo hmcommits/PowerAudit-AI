@@ -66,7 +66,7 @@ async function main() {
 	// `as any`: this is a real 'rocketride' client instance (not 'shell's
 	// re-typed one) - see billIngestion.ts's own note on the type drift
 	// between the two packages (docs/CLAUDE.md Backlog).
-	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY });
+	const client: any = new RocketRideClient({ uri: env.ROCKETRIDE_URI, auth: env.ROCKETRIDE_APIKEY, persist: true });
 	await client.connect();
 
 	let failures = 0;

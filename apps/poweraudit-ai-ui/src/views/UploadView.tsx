@@ -20,7 +20,7 @@ import { FindingTypeBadge, MoneyValue, SECTION_LABEL_STYLE, SUBTLE_TEXT_STYLE } 
  */
 export const UploadView: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
-	const { stage, progressPct, result, errorMsg, fileName, slow, serverFinished } = useUploadState();
+	const { stage, progressPct, result, errorMsg, fileName, slow, serverFinished, attempt, maxAttempts } = useUploadState();
 
 	const handleFiles = useCallback(
 		(files: FileList) => {
@@ -71,6 +71,14 @@ export const UploadView: React.FC = () => {
 						<div style={{ marginTop: 10, ...SUBTLE_TEXT_STYLE }}>
 							You can switch to another tab while this runs - it keeps processing in the background, and the result will still be here when you come back.
 						</div>
+						{attempt > 1 && (
+							<div style={{ marginTop: 12 }}>
+								<Banner variant="warning">
+									The connection dropped partway through - this happens occasionally and isn’t something you did. Automatically retrying (attempt{' '}
+									{attempt} of {maxAttempts})…
+								</Banner>
+							</div>
+						)}
 						{serverFinished && (
 							<div style={{ marginTop: 12 }}>
 								<Banner variant="info">The server has finished reading this bill and the result is on its way.</Banner>
